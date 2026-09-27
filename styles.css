@@ -24,9 +24,9 @@ body.options-page {
 }
 
 body.options-page.options-popup {
-  width: 540px;
-  min-width: 540px;
-  max-width: 540px;
+  width: 480px;
+  min-width: 480px;
+  max-width: 480px;
   padding: 0;
   overflow-y: visible;
   overflow-x: hidden;
@@ -34,9 +34,9 @@ body.options-page.options-popup {
 }
 
 .options-popup-root {
-  width: 540px;
-  min-width: 540px;
-  max-width: 540px;
+  width: 480px;
+  min-width: 480px;
+  max-width: 480px;
   max-height: 600px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -53,8 +53,8 @@ body.options-page.options-popup {
 
 .options-popup form {
   min-width: 0;
-  gap: 11px;
-  padding: 11px;
+  gap: 7px;
+  padding: 8px;
 }
 
 .repository-link {
@@ -113,6 +113,27 @@ h1 {
   text-overflow: ellipsis;
 }
 
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brand-title > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  object-fit: contain;
+}
+
+.popup > .popup-intro,
 .popup > p,
 .popup > .actions,
 .popup > a {
@@ -120,9 +141,25 @@ h1 {
   margin-left: 9px;
 }
 
-.popup > p:first-of-type {
+.popup-intro {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-top: 10px;
   margin-bottom: 10px;
+}
+
+.popup-intro .brand-logo {
+  display: block;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  object-fit: contain;
+}
+
+.popup-intro > p {
+  min-width: 0;
+  margin: 0;
 }
 
 p {
@@ -169,10 +206,64 @@ legend {
   gap: 10px;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 420px) {
   .voice-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.options-popup h1 {
+  min-height: 22px;
+  padding: 3px 5px;
+}
+
+.options-popup fieldset {
+  padding: 7px 7px 6px;
+}
+
+.options-popup .engine-info {
+  gap: 6px;
+  padding: 3px 5px;
+}
+
+.options-popup .voice-grid {
+  column-gap: 8px;
+  row-gap: 5px;
+}
+
+.options-popup label {
+  gap: 3px;
+}
+
+.options-popup .toggle-row,
+.options-popup .actions {
+  gap: 5px;
+}
+
+.options-popup select {
+  height: 23px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.options-popup input[type="range"] {
+  height: 18px;
+}
+
+.options-popup input[type="range"]::-webkit-slider-thumb {
+  height: 17px;
+  margin-top: -7px;
+}
+
+.options-popup button {
+  min-height: 23px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.options-popup #status {
+  min-height: 16px;
+  padding: 2px 4px;
 }
 
 label {

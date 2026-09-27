@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "tesseract.js": "^7.0.0"
+    "onnxruntime-web": "1.30.0"
   }
 }

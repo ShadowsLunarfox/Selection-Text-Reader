@@ -291,6 +291,11 @@ function ensureOverlay() {
     return;
   }
 
+  const titleLogo = '<img class="brand-icon" src="' + chrome.runtime.getURL("assets/icons/icon-16.png") +
+    '" srcset="' + chrome.runtime.getURL("assets/icons/icon-32.png") + ' 2x" width="16" height="16" alt="">';
+  const launcherLogo = '<img src="' + chrome.runtime.getURL("assets/icons/icon-24.png") +
+    '" srcset="' + chrome.runtime.getURL("assets/icons/icon-48.png") + ' 2x" width="24" height="24" alt="">';
+
   host = document.createElement("div");
   host.id = HOST_ID;
   host.style.cssText = "all:initial;position:fixed;z-index:2147483647;top:0;left:0";
@@ -309,6 +314,7 @@ function ensureOverlay() {
         padding: 2px 0 0 2px; border-color: #000 #fff #fff #000;
         box-shadow: inset 1px 1px #808080;
       }
+      .launcher img { display: block; width: 24px; height: 24px; margin: auto; object-fit: contain; pointer-events: none; }
       .panel {
         position: fixed; width: min(360px, calc(100vw - 24px)); padding: 3px 3px 11px;
         max-height: calc(100vh - 24px); overflow: auto;
@@ -322,7 +328,9 @@ function ensureOverlay() {
         min-height: 23px; margin-bottom: 8px; padding: 2px 3px 2px 5px;
         color: #fff; background: #000080;
       }
-      .title { overflow: hidden; font-size: 12px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+      .title-group { display: flex; align-items: center; gap: 6px; min-width: 0; margin-right: 6px; }
+      .brand-icon { display: block; width: 16px; height: 16px; flex: 0 0 16px; object-fit: contain; }
+      .title { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
       .close {
         width: 18px; min-width: 18px; height: 18px; min-height: 18px; padding: 0;
         color: #000; background: #c0c0c0; border: 2px solid; border-color: #fff #000 #000 #fff;
@@ -366,7 +374,7 @@ function ensureOverlay() {
         border-color: #fff #000 #000 #fff; box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080, 2px 2px 0 rgba(0,0,0,.28);
         font: 12px Tahoma, "MS Sans Serif", Arial, sans-serif;
       }
-      .mini-header { margin-bottom: 7px; padding: 3px 5px; color: #fff; background: #000080; font-weight: 700; }
+      .mini-header { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; padding: 3px 5px; color: #fff; background: #000080; font-weight: 700; }
       .mini-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 0 6px; }
       .mini-controls .action { min-width: 0; padding-right: 4px; padding-left: 4px; }
       .mini-progress { margin: 7px 6px 0; padding: 3px 5px; overflow: hidden; background: #fff; border: 2px solid; border-color: #808080 #fff #fff #808080; white-space: nowrap; text-overflow: ellipsis; }
@@ -377,9 +385,9 @@ function ensureOverlay() {
       .ocr-text { display: block; width: calc(100% - 16px); min-height: 180px; max-height: 50vh; margin: 8px; padding: 6px; resize: vertical; color: #000; background: #fff; border: 2px solid; border-color: #808080 #fff #fff #808080; border-radius: 0; font: 13px Tahoma, Arial, sans-serif; line-height: 1.4; }
       .ocr-status { min-height: 20px; margin: 8px 8px 0; padding: 3px 5px; background: #fff; border: 1px solid; border-color: #808080 #fff #fff #808080; }
     </style>
-    <button class="launcher" type="button" data-i18n-title="openReadingPanel" title="Open reading panel" hidden>R</button>
+    <button class="launcher" type="button" data-i18n-title="openReadingPanel" data-i18n-aria-label="openReadingPanel" title="Open reading panel" aria-label="Open reading panel" hidden>${launcherLogo}</button>
     <section class="mini-player" hidden>
-      <div class="mini-header" data-i18n="appName">Selection Text Reader</div>
+      <div class="mini-header">${titleLogo}<span class="title" data-i18n="appName">Selection Text Reader</span></div>
       <div class="mini-controls">
         <button class="action mini-previous" type="button" data-i18n="previous">Previous</button>
         <button class="action mini-pause" type="button" data-i18n="pause">Pause</button>
@@ -393,7 +401,7 @@ function ensureOverlay() {
       <div class="ocr-selection" hidden></div>
     </div>
     <section class="ocr-result" hidden>
-      <div class="header"><span class="title" data-i18n="screenScanner">Screen Text Scanner</span><button class="close ocr-close" type="button" data-i18n-title="close" title="Close">x</button></div>
+      <div class="header"><span class="title-group">${titleLogo}<span class="title" data-i18n="screenScanner">Screen Text Scanner</span></span><button class="close ocr-close" type="button" data-i18n-title="close" title="Close">x</button></div>
       <textarea class="ocr-text" data-i18n-aria-label="recognizedText" aria-label="Recognized text"></textarea>
       <div class="actions">
         <button class="action ocr-read" type="button" data-i18n="readText">Read text</button>
@@ -403,7 +411,7 @@ function ensureOverlay() {
       <div class="ocr-status" role="status" aria-live="polite"></div>
     </section>
     <section class="panel" hidden>
-      <div class="header"><span class="title" data-i18n="appName">Selection Text Reader</span><button class="close" type="button" data-i18n-title="close" title="Close">x</button></div>
+      <div class="header"><span class="title-group">${titleLogo}<span class="title" data-i18n="appName">Selection Text Reader</span></span><button class="close" type="button" data-i18n-title="close" title="Close">x</button></div>
       <p class="text"></p>
       <div class="actions">
         <button class="action read-original" type="button" data-i18n="readOriginal">Read original</button>

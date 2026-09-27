@@ -3,7 +3,15 @@
   "minimum_chrome_version": "114",
   "name": "Selection Text Reader",
   "description": "Read selected text aloud in its original language or translate and read it.",
-  "version": "2.6.10",
+  "version": "2.6.11",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png",
+    "256": "assets/icons/icon-256.png",
+    "512": "assets/icons/icon-512.png"
+  },
   "permissions": [
     "activeTab",
     "contextMenus",
@@ -16,11 +24,10 @@
     "service_worker": "background.js"
   },
   "host_permissions": [
-    "https://translate.googleapis.com/*",
-    "https://cdn.jsdelivr.net/*"
+    "https://translate.googleapis.com/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src https://translate.googleapis.com https://cdn.jsdelivr.net data: blob:; img-src 'self' data: blob:"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' https://translate.googleapis.com data: blob:; img-src 'self' data: blob:"
   },
   "content_scripts": [
     {
@@ -30,6 +37,13 @@
     }
   ],
   "action": {
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "24": "assets/icons/icon-24.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "64": "assets/icons/icon-64.png"
+    },
     "default_title": "Selection Text Reader",
     "default_popup": "popup.html"
   },
@@ -47,5 +61,16 @@
       "description": "Stop reading"
     }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/icons/icon-16.png",
+        "assets/icons/icon-24.png",
+        "assets/icons/icon-32.png",
+        "assets/icons/icon-48.png"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

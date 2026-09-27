@@ -1,5 +1,7 @@
 # Selection Text Reader
 
+<img src="assets/icons/icon-256.png" alt="Selection Text Reader logo" width="128" height="128">
+
 A simple Chrome and Edge extension that reads selected text aloud from the extension menu.
 
 ## Installation
@@ -27,9 +29,8 @@ A simple Chrome and Edge extension that reads selected text aloud from the exten
 - A fixed Windows 98-style mini player appears during reading.
 - Chinese, English, Japanese, and Korean can each use a different preferred voice.
 - Installed Windows and macOS system voices are detected automatically and labeled in the voice list.
-- **Scan screen text** lets you drag over part of the current tab, recognize text locally with Tesseract.js, then read or copy the result.
-- OCR screenshots stay on the device. Language model files are downloaded on demand and cached by the browser.
-- Harmless legacy-parameter warnings from the OCR engine are filtered while real OCR errors remain visible.
+- **Scan screen text** lets you drag over part of the current tab, recognize text locally with PP-OCRv5 and ONNX Runtime Web, then read or copy the result.
+- The OCR runtime and recognition models are bundled with the extension. OCR works offline, and screenshots stay on the device.
+- Screen OCR supports mixed Chinese, Japanese, and English. The Korean + English setting uses its own PP-OCRv5 recognition model.
+- Translation still uses Google Translate and requires an internet connection.
 - The interface can be switched between English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Thai, and Malay.
-
-

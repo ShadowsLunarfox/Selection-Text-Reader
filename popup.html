@@ -4,12 +4,16 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Selection Text Reader</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/icon-32.png">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body class="popup-page">
     <main class="popup">
-      <h1 data-i18n="appName">Selection Text Reader</h1>
-      <p data-i18n="intro">Select text on the current web page, then open this menu to read it aloud.</p>
+      <h1 class="brand-title"><img class="brand-icon" src="assets/icons/icon-16.png" srcset="assets/icons/icon-32.png 2x" width="16" height="16" alt=""><span data-i18n="appName">Selection Text Reader</span></h1>
+      <div class="popup-intro">
+        <img class="brand-logo" src="assets/icons/icon-64.png" srcset="assets/icons/icon-128.png 2x" width="64" height="64" alt="">
+        <p data-i18n="intro">Select text on the current web page, then open this menu to read it aloud.</p>
+      </div>
       <div class="actions">
         <button id="readButton" type="button" data-i18n="startReading">Start reading</button>
         <button id="pauseButton" type="button" data-i18n="pause" disabled>Pause</button>
