@@ -1,7 +1,14 @@
-importScripts("i18n.js");
-
 const READING_MENU_ID = "toggle-reading";
 const TERMINAL_TTS_EVENTS = new Set(["end", "interrupted", "cancelled", "error"]);
+const BACKGROUND_MESSAGES = {
+  en: { startReading: "Start reading", stopReading: "Stop reading" },
+  "zh-CN": { startReading: "开始朗读", stopReading: "停止朗读" },
+  "zh-TW": { startReading: "開始朗讀", stopReading: "停止朗讀" },
+  ja: { startReading: "読み上げ開始", stopReading: "読み上げ停止" },
+  ko: { startReading: "읽기 시작", stopReading: "읽기 중지" },
+  th: { startReading: "เริ่มอ่าน", stopReading: "หยุดอ่าน" },
+  ms: { startReading: "Mula membaca", stopReading: "Henti membaca" }
+};
 const DEFAULT_SETTINGS = {
   uiLanguage: "en",
   rate: 1, pitch: 1, volume: 1, lang: "zh-CN", voiceName: "", languageVoices: {},
@@ -24,20 +31,20 @@ let activeOcrPromise = null;
 let uiLanguage = "en";
 
 chrome.storage.sync.get({ uiLanguage: "en" }).then((settings) => {
-  uiLanguage = ReaderI18n.normalizeLanguage(settings.uiLanguage);
+  uiLanguage = normalizeUiLanguage(settings.uiLanguage);
   updateContextMenuTitle();
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await ensureDefaultSettings();
-  uiLanguage = ReaderI18n.normalizeLanguage(settings.uiLanguage);
+  uiLanguage = normalizeUiLanguage(settings.uiLanguage);
   createContextMenu();
 });
 chrome.runtime.onStartup.addListener(refreshLanguageAndMenu);
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "sync" && changes.uiLanguage) {
-    uiLanguage = ReaderI18n.normalizeLanguage(changes.uiLanguage.newValue);
+    uiLanguage = normalizeUiLanguage(changes.uiLanguage.newValue);
     updateContextMenuTitle();
   }
 });
@@ -214,13 +221,13 @@ async function ensureDefaultSettings() {
 
 async function refreshLanguageAndMenu() {
   const settings = await chrome.storage.sync.get({ uiLanguage: "en" });
-  uiLanguage = ReaderI18n.normalizeLanguage(settings.uiLanguage);
+  uiLanguage = normalizeUiLanguage(settings.uiLanguage);
   createContextMenu();
 }
 
 function createContextMenu() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: READING_MENU_ID, title: ReaderI18n.t("startReading", uiLanguage), contexts: ["all"] });
+    chrome.contextMenus.create({ id: READING_MENU_ID, title: backgroundMessage("startReading"), contexts: ["all"] });
   });
 }
 
@@ -330,7 +337,7 @@ function publicReadingState() {
 function updateReadingState() {
   chrome.contextMenus.update(
     READING_MENU_ID,
-    { title: ReaderI18n.t(reading.active ? "stopReading" : "startReading", uiLanguage) },
+    { title: backgroundMessage(reading.active ? "stopReading" : "startReading") },
     () => void chrome.runtime.lastError
   );
   const message = { action: "reading-state", state: publicReadingState() };
@@ -341,9 +348,17 @@ function updateReadingState() {
 function updateContextMenuTitle() {
   chrome.contextMenus.update(
     READING_MENU_ID,
-    { title: ReaderI18n.t(reading.active ? "stopReading" : "startReading", uiLanguage) },
+    { title: backgroundMessage(reading.active ? "stopReading" : "startReading") },
     () => void chrome.runtime.lastError
   );
+}
+
+function normalizeUiLanguage(language) {
+  return Object.hasOwn(BACKGROUND_MESSAGES, language) ? language : "en";
+}
+
+function backgroundMessage(key) {
+  return BACKGROUND_MESSAGES[uiLanguage][key] || BACKGROUND_MESSAGES.en[key] || key;
 }
 
 function splitIntoSpeechChunks(text, language) {
