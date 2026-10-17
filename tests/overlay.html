@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Reader overlay regression tests</title>
+<p id="page-text">Selected text must remain selected when the reader opens.</p>
+<button id="page-button">Page control</button>
+<pre id="test-results"></pre>
+<script>
+  let finishCapture;
+  let readerMessageHandler;
+  globalThis.chrome = {
+    runtime: {
+      id: "overlay-test",
+      getURL: (file) => new URL(file, location.href).href,
+      onMessage: { addListener: (listener) => { readerMessageHandler = listener; } },
+      sendMessage: async (message) => {
+        if (message.action === "translate-text") return { translatedText: "Visible translation result" };
+        if (message.action === "capture-region") return new Promise((resolve) => { finishCapture = resolve; });
+        return { started: true };
+      }
+    },
+    storage: {
+      sync: { get: async (defaults) => defaults, set: async () => {} },
+      onChanged: { addListener() {} }
+    }
+  };
+</script>
+<script src="/i18n.js"></script>
+<script src="/content.js"></script>
+<script>
+  const reports = [];
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  function assert(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+  async function check(name, action) {
+    try {
+      await action();
+      reports.push(`PASS ${name}`);
+    } catch (error) {
+      reports.push(`FAIL ${name}: ${error.stack || error}`);
+    }
+  }
+  function assertInFront(element) {
+    const rect = element.getBoundingClientRect();
+    assert(rect.width > 0 && rect.height > 0, "Window must have a visible size");
+    const x = Math.max(0, Math.min(innerWidth - 1, rect.left + rect.width / 2));
+    const y = Math.max(0, Math.min(innerHeight - 1, rect.top + rect.height / 2));
+    assert(document.elementFromPoint(x, y) === host, "Page element covers the reader");
+    const hit = shadow.elementFromPoint(x, y);
+    assert(hit === element || element.contains(hit), "Another reader window covers the result");
+  }
+
+  (async () => {
+    let pagePopover;
+    let modal;
+    await check("opening preserves the selected text and hides inactive controls", () => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector("#page-text"));
+      getSelection().addRange(range);
+      const selectionBefore = getSelection().toString();
+      ensureOverlay();
+      positionLauncher({ right: 100, bottom: 80 });
+      launcher.hidden = false;
+      assert(host.matches(":popover-open"), "Reader must use the top layer");
+      assert(getSelection().toString() === selectionBefore, "Opening the host changed the selection");
+      assert(getComputedStyle(shadow.querySelector(".playback")).display === "none", "Hidden flex controls leaked through");
+      assertInFront(launcher);
+    });
+
+    await check("later maximum-z-index elements and page CSS cannot cover the launcher", () => {
+      const style = document.createElement("style");
+      style.textContent = `
+        html { transform: translate(15px, 10px); overflow: hidden; }
+        #selection-text-reader-overlay {
+          display: none !important; position: absolute !important; z-index: -1 !important;
+          transform: scale(.1) !important; opacity: .1 !important;
+          padding: 200px !important; overflow: hidden !important;
+        }
+        ::backdrop { background: red !important; pointer-events: auto !important; }
+      `;
+      document.head.appendChild(style);
+      const cover = document.createElement("aside");
+      cover.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:red";
+      document.documentElement.appendChild(cover);
+      assertInFront(launcher);
+      assert(document.elementFromPoint(innerWidth - 5, innerHeight - 5) !== host, "Transparent host blocks the page");
+      assert(getComputedStyle(host, "::backdrop").backgroundColor === "rgba(0, 0, 0, 0)", "Page backdrop styles leaked into the reader");
+    });
+
+    await check("later page popovers stay open below the reader", async () => {
+      pagePopover = document.createElement("section");
+      pagePopover.popover = "auto";
+      pagePopover.style.cssText = "position:fixed;inset:0;margin:0;width:100vw;height:100vh;background:blue";
+      document.body.appendChild(pagePopover);
+      pagePopover.showPopover();
+      await pause();
+      assertInFront(launcher);
+      assert(pagePopover.matches(":popover-open"), "Reader closed the page popover");
+    });
+
+    await check("translation results remain visible and fit within the viewport", async () => {
+      selectedText = "Selected text";
+      openPanel();
+      await translateAndRead();
+      assert(translationElement.textContent === "Visible translation result", "Translation result is missing");
+      assertInFront(panel);
+      assert(panel.getBoundingClientRect().bottom <= innerHeight - 11, "Panel extends below the viewport");
+      assert(pagePopover.matches(":popover-open"), "Showing results closed the page popover");
+    });
+
+    await check("reader controls remain interactive over a modal dialog", async () => {
+      modal = document.createElement("dialog");
+      modal.innerHTML = "<button>Modal control</button>";
+      document.body.appendChild(modal);
+      modal.showModal();
+      await pause();
+      assert(host.parentNode === modal, "Reader is outside the modal's interactive subtree");
+      assertInFront(panel);
+      const language = shadow.querySelector(".language");
+      language.focus();
+      assert(shadow.activeElement === language, "Modal makes reader controls inert");
+      assert(modal.open, "Reader closed the modal");
+    });
+
+    await check("OCR results stay above overlapping reader controls and scroll on short screens", () => {
+      getSelection().removeAllRanges();
+      renderReadingState({ active: true, paused: false, index: 0, total: 1, currentText: "Reading" });
+      showOcrResult("Visible OCR result", "Complete");
+      const result = shadow.querySelector(".ocr-result");
+      const bounds = result.getBoundingClientRect();
+      panel.hidden = false;
+      panel.style.left = `${bounds.left}px`;
+      panel.style.top = `${bounds.top}px`;
+      assertInFront(result);
+      assert(bounds.top >= 11 && bounds.bottom <= innerHeight - 11, "OCR result extends outside the viewport");
+      const text = shadow.querySelector(".ocr-text");
+      text.focus();
+      assert(shadow.activeElement === text, "OCR result cannot receive focus");
+      raiseOverlay();
+      assert(shadow.activeElement === text, "Bringing results forward lost keyboard focus");
+    });
+
+    await check("OCR selection covers the player and Escape restores page interaction", () => {
+      startOcrSelection();
+      const overlay = shadow.querySelector(".ocr-overlay");
+      assertInFront(overlay);
+      handleReadingShortcut(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      assert(overlay.hidden, "Escape did not cancel scanning");
+      assert(document.elementFromPoint(5, 5) !== host, "Cancelled scanner blocks the page");
+    });
+
+    await check("reader is hidden during screenshot capture and restored for OCR results", async () => {
+      startOcrSelection();
+      ocrDragStart = { x: 20, y: 20 };
+      // Virtual-time dump-dom does not reliably advance animation frames.
+      // Keep the capture lifecycle asynchronous while testing its visibility states.
+      const originalRequestAnimationFrame = window.requestAnimationFrame;
+      let capture;
+      try {
+        window.requestAnimationFrame = (callback) => setTimeout(callback, 0);
+        capture = finishOcrDrag({ clientX: 200, clientY: 100 });
+        for (let attempt = 0; attempt < 20 && !finishCapture; attempt++) await pause();
+      } finally {
+        window.requestAnimationFrame = originalRequestAnimationFrame;
+      }
+      assert(finishCapture, "Screenshot capture was not requested");
+      assert(getComputedStyle(host).visibility === "hidden", "Reader leaks into the screenshot");
+      readerMessageHandler({ action: "ocr-captured" });
+      assert(getComputedStyle(host).visibility === "visible", "OCR progress did not restore the reader");
+      finishCapture({ text: "Captured text" });
+      await capture;
+      assert(shadow.querySelector(".ocr-text").value === "Captured text", "Captured result is missing");
+      assertInFront(shadow.querySelector(".ocr-result"));
+    });
+
+    await check("closing a page modal keeps the OCR result accessible", async () => {
+      modal.close();
+      await pause();
+      assert(host.parentNode === document.documentElement, "Reader stayed inside the closed modal");
+      assertInFront(shadow.querySelector(".ocr-result"));
+      shadow.querySelector(".ocr-close").click();
+      assert(shadow.querySelector(".ocr-result").hidden, "OCR close button stopped working");
+    });
+
+    await check("invalidating the extension context removes its top-layer host", () => {
+      const oldHost = host;
+      invalidateExtensionContext();
+      assert(!oldHost.isConnected && !oldHost.matches(":popover-open"), "Reader leaked after invalidation");
+    });
+
+    document.querySelector("#test-results").textContent = reports.join("\n");
+    document.documentElement.dataset.testStatus = reports.some((report) => report.startsWith("FAIL")) ? "failed" : "passed";
+  })().catch((error) => {
+    document.querySelector("#test-results").textContent = error.stack;
+    document.documentElement.dataset.testStatus = "failed";
+  });
+</script>
+</html>

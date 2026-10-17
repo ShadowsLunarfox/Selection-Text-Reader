@@ -36,6 +36,7 @@ document.addEventListener("mouseup", handleSelectionChange);
 document.addEventListener("keyup", handleSelectionChange);
 document.addEventListener("keydown", handleReadingShortcut, true);
 document.addEventListener("scroll", handleScroll, true);
+document.addEventListener("toggle", handlePageOverlayToggle, true);
 loadInterfaceLanguage();
 
 async function loadInterfaceLanguage() {
@@ -222,7 +223,7 @@ async function finishOcrDrag(event) {
 
   cancelOcrSelection();
   showOcrResult("", tr("capturing"));
-  host.style.visibility = "hidden";
+  host.style.setProperty("visibility", "hidden", "important");
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   const response = await safeSendMessage({
@@ -230,7 +231,7 @@ async function finishOcrDrag(event) {
     rectangle,
     viewport: { width: window.innerWidth, height: window.innerHeight }
   });
-  if (host) host.style.visibility = "visible";
+  if (host) host.style.setProperty("visibility", "visible", "important");
   if (!response) return;
   if (response.error) {
     showOcrResult("", response.error);
@@ -245,6 +246,7 @@ function showOcrResult(text, status) {
   shadow.querySelector(".ocr-text").value = text;
   shadow.querySelector(".ocr-status").textContent = status;
   result.hidden = false;
+  raiseOverlay();
 }
 
 function closeOcrResult() {
@@ -286,8 +288,36 @@ function handleScroll(event) {
   hideOverlay();
 }
 
+function handlePageOverlayToggle(event) {
+  if (!host || event.target === host || !(event.target instanceof HTMLElement)) return;
+  const opened = event.newState === "open" && event.target.matches(":popover-open, dialog:modal");
+  const closedParent = event.newState === "closed" && event.target.contains(host);
+  if ((opened || closedParent) && shadow.querySelector(
+    ".launcher:not([hidden]), .panel:not([hidden]), .mini-player:not([hidden]), .ocr-overlay:not([hidden]), .ocr-result:not([hidden])"
+  )) {
+    raiseOverlay();
+  }
+}
+
+function raiseOverlay() {
+  if (!host) return;
+
+  // A modal makes nodes outside it inert, even when they are in the top layer.
+  const modals = [...document.querySelectorAll("dialog:modal")];
+  const modal = document.activeElement?.closest("dialog:modal") || modals.at(-1);
+  const parent = modal || document.fullscreenElement || document.documentElement;
+  if (host.parentNode !== parent) parent.appendChild(host);
+
+  // z-index alone cannot put the reader above page dialogs and popovers.
+  if (typeof host.showPopover === "function") {
+    if (host.matches(":popover-open")) host.hidePopover();
+    host.showPopover();
+  }
+}
+
 function ensureOverlay() {
   if (host) {
+    raiseOverlay();
     return;
   }
 
@@ -298,11 +328,19 @@ function ensureOverlay() {
 
   host = document.createElement("div");
   host.id = HOST_ID;
-  host.style.cssText = "all:initial;position:fixed;z-index:2147483647;top:0;left:0";
+  host.setAttribute("popover", "manual");
+  host.style.cssText = "all:initial!important;position:fixed!important;z-index:2147483647!important;inset:0 auto auto 0!important;width:0!important;height:0!important;margin:0!important;padding:0!important;border:0!important;overflow:visible!important;pointer-events:none!important";
   shadow = host.attachShadow({ mode: "closed" });
   shadow.innerHTML = `
     <style>
+      :host::backdrop { background: transparent !important; pointer-events: none !important; }
       * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      .launcher, .panel, .mini-player, .ocr-overlay, .ocr-result { pointer-events: auto; }
+      .launcher, .mini-player { z-index: 1; }
+      .panel { z-index: 2; }
+      .ocr-overlay { z-index: 3; }
+      .ocr-result { z-index: 4; max-height: calc(100vh - 24px); overflow: auto; }
       button, select { font: 12px Tahoma, "MS Sans Serif", Arial, sans-serif; letter-spacing: 0; }
       .launcher {
         position: fixed; width: 30px; height: 30px; padding: 0; color: #000080;
@@ -430,7 +468,7 @@ function ensureOverlay() {
     </section>
   `;
 
-  document.documentElement.appendChild(host);
+  raiseOverlay();
   launcher = shadow.querySelector(".launcher");
   panel = shadow.querySelector(".panel");
   statusElement = shadow.querySelector(".status");
@@ -489,6 +527,7 @@ function positionLauncher(rect) {
 }
 
 function openPanel() {
+  raiseOverlay();
   const launcherRect = launcher.getBoundingClientRect();
   const panelWidth = Math.min(360, window.innerWidth - 24);
   const left = Math.max(12, Math.min(window.innerWidth - panelWidth - 12, launcherRect.left));
@@ -502,6 +541,7 @@ function openPanel() {
   statusElement.textContent = "";
   panel.style.left = `${left}px`;
   panel.style.top = `${top}px`;
+  panel.style.maxHeight = `calc(100vh - ${top + 12}px)`;
   panel.hidden = false;
   launcher.hidden = true;
 }
@@ -541,6 +581,7 @@ function renderReadingState(state) {
   const miniPlayer = shadow.querySelector(".mini-player");
   const miniPause = shadow.querySelector(".mini-pause");
   const miniProgress = shadow.querySelector(".mini-progress");
+  if (state?.active && miniPlayer.hidden) raiseOverlay();
   playback.hidden = !state?.active;
   current.hidden = !state?.active;
   miniPlayer.hidden = !state?.active;
@@ -690,6 +731,7 @@ async function translateAndRead() {
 
     translationElement.textContent = response.translatedText;
     translationElement.hidden = false;
+    raiseOverlay();
     const readingResponse = await safeSendMessage({
       action: "speak-text",
       text: response.translatedText,
@@ -780,7 +822,7 @@ chrome.runtime.onMessage.addListener((message) => {
     return;
   }
   if (message.action === "ocr-captured") {
-    if (host) host.style.visibility = "visible";
+    if (host) host.style.setProperty("visibility", "visible", "important");
     showOcrResult("", tr("loadingOcr"));
     return;
   }
