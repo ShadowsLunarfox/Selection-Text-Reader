@@ -50,6 +50,13 @@
           </select>
         </label>
 
+        <label class="toggle-row"><input id="enableSingleKeyShortcut" type="checkbox"><span data-i18n="enableR"></span></label>
+        <label><span data-i18n="disabledSites"></span><textarea id="disabledSites" rows="3" placeholder="example.com"></textarea></label>
+        <label class="toggle-row"><input id="skipCodeBlocks" type="checkbox"><span data-i18n="skipCodeBlocks"></span></label>
+        <label class="toggle-row"><input id="rememberReading" type="checkbox"><span data-i18n="rememberReading"></span></label>
+        <p class="setting-help" data-i18n="bookmarkHelp"></p>
+        <button id="clearReadingHistory" type="button" data-i18n="clearReadingHistory"></button>
+
         <div class="engine-info">
           <span data-i18n="systemVoiceEngine">Detected system voice engine</span>
           <strong id="systemEngine"></strong>
@@ -114,6 +121,7 @@
       </form>
     </main>
     <script src="i18n.js"></script>
+    <script src="reader-page.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

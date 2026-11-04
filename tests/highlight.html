@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Reading highlight regression tests</title>
+<style>
+  body { margin: 8px; font: 16px/1.5 Arial, sans-serif; }
+  #fixtures { width: 300px; }
+  .scroller { width: 260px; height: 96px; overflow: auto; border: 2px solid; scroll-behavior: auto; }
+</style>
+<div id="fixtures"></div>
+<pre id="test-results"></pre>
+<script>
+  globalThis.chrome = {
+    runtime: {
+      id: "highlight-test",
+      getURL: (file) => new URL(file, location.href).href,
+      onMessage: { addListener() {} },
+      sendMessage: async () => ({ started: true })
+    },
+    storage: {
+      sync: { get: async (defaults) => defaults },
+      onChanged: { addListener() {} }
+    }
+  };
+</script>
+<script src="/i18n.js"></script>
+<script src="/reader-page.js"></script>
+<script src="/content.js"></script>
+<script>
+  const fixtures = document.querySelector("#fixtures");
+  const reports = [];
+  function assert(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+  function highlight(text, index = 0) {
+    highlightCurrentSentence({ currentText: text, index });
+    const result = CSS.highlights.get("selection-reader-current");
+    assert(result?.size, "Current reading highlight is missing");
+    return [...result][0];
+  }
+  function select(element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    selectedRange = range.cloneRange();
+    return range;
+  }
+  async function check(name, action) {
+    try {
+      await action();
+      reports.push(`PASS ${name}`);
+    } catch (error) {
+      reports.push(`FAIL ${name}: ${error.stack || error}`);
+    } finally {
+      clearReadingHighlight();
+      fixtures.replaceChildren();
+      getSelection().removeAllRanges();
+      selectedRange = null;
+      window.scrollTo(0, 0);
+    }
+  }
+  (async () => {
+    await check("highlights span rendered line breaks, blocks, and hidden accessibility text", () => {
+      fixtures.innerHTML = '<div id="passage"><div>First <strong>line</strong></div><div>second<br>line<span hidden>not spoken</span> end.</div></div>';
+      select(fixtures.querySelector("#passage"));
+      const range = highlight("First line second line end.");
+      assert(range.startContainer.textContent === "First ", "Highlight lost its first text node");
+      assert(range.endContainer.textContent === " end.", "Highlight was truncated before the last text node");
+      assert(range.endOffset === " end.".length, "Highlight was truncated inside the last text node");
+    });
+
+    await check("only text within element selection boundaries can be highlighted", () => {
+      fixtures.innerHTML = '<div id="passage"><span>Repeat.</span><span>Repeat.</span></div>';
+      const passage = fixtures.firstChild;
+      const range = document.createRange();
+      range.setStart(passage, 1);
+      range.setEnd(passage, 2);
+      selectedRange = range;
+      assert(highlight("Repeat.").startContainer === passage.lastChild.firstChild, "Highlight escaped the selected element boundaries");
+    });
+
+    await check("following a sentence scrolls nested vertical containers", () => {
+      fixtures.innerHTML = '<div class="scroller"><div style="height:240px"></div><div class="scroller"><div style="height:220px"></div><p id="target">The whole current sentence must remain visible.</p><div style="height:180px"></div></div><div style="height:180px"></div></div>';
+      const target = fixtures.querySelector("#target");
+      select(target);
+      const range = highlight(target.textContent);
+      const rect = range.getBoundingClientRect();
+      for (const scroller of fixtures.querySelectorAll(".scroller")) {
+        const bounds = scroller.getBoundingClientRect();
+        assert(scroller.scrollTop > 0, "An internal scroll container did not follow the sentence");
+        assert(rect.top >= bounds.top && rect.bottom <= bounds.bottom, "Highlighted text is clipped by a vertical container");
+      }
+    });
+
+    await check("following code text scrolls horizontal containers", () => {
+      fixtures.innerHTML = '<div class="scroller"><pre style="margin:0"><span>' + "padding ".repeat(60) + '</span><span id="target">Highlighted code.</span></pre></div>';
+      const target = fixtures.querySelector("#target");
+      select(target);
+      const rect = highlight(target.textContent).getBoundingClientRect();
+      const scroller = fixtures.firstChild;
+      const bounds = scroller.getBoundingClientRect();
+      assert(scroller.scrollLeft > 0, "The horizontal container did not follow the sentence");
+      assert(rect.left >= bounds.left && rect.right <= bounds.right, "Highlighted code is clipped horizontally");
+    });
+
+    await check("long highlights keep the first line visible in a short container", () => {
+      const text = "A sentence that wraps across many lines in a narrow scrolling post ".repeat(5) + ".";
+      fixtures.innerHTML = '<div class="scroller"><div style="height:200px"></div><p id="target"></p><div style="height:100px"></div></div>';
+      const target = fixtures.querySelector("#target");
+      target.textContent = text;
+      select(target);
+      const range = highlight(text);
+      const firstLine = [...range.getClientRects()].find((rect) => rect.width && rect.height);
+      const bounds = fixtures.firstChild.getBoundingClientRect();
+      assert(firstLine.top >= bounds.top && firstLine.bottom <= bounds.bottom, "The first highlighted line remains clipped");
+      assert(range.toString() === text, "Long sentence highlight was truncated");
+    });
+
+    await check("repeated sentences move forward and backward without truncation", () => {
+      fixtures.innerHTML = '<p>Same sentence. <em>Same sentence.</em> Last sentence.</p>';
+      const passage = fixtures.firstChild;
+      select(passage);
+      assert(highlight("Same sentence.", 0).startContainer === passage.firstChild, "First occurrence was skipped");
+      assert(highlight("Same sentence.", 1).startContainer === passage.querySelector("em").firstChild, "Second occurrence reused the first");
+      assert(highlight("Same sentence.", 0).startContainer === passage.firstChild, "Backward skip did not reset the search");
+    });
+
+    await check("absolute jumps highlight the chosen occurrence of a repeated sentence", () => {
+      fixtures.innerHTML = '<p>Same sentence. <em>Same sentence.</em> <strong>Same sentence.</strong></p>';
+      select(fixtures.firstChild);
+      highlightCurrentSentence({ currentText: "Same sentence.", index: 2, sourceOffset: 26, sourceLength: 39 });
+      const range = [...CSS.highlights.get("selection-reader-current")][0];
+      assert(range.startContainer === fixtures.querySelector("strong").firstChild, "Jump highlighted the wrong repeated sentence");
+    });
+    document.querySelector("#test-results").textContent = reports.join("\n");
+    document.documentElement.dataset.testStatus = reports.some((report) => report.startsWith("FAIL")) ? "failed" : "passed";
+  })().catch((error) => {
+    document.querySelector("#test-results").textContent = error.stack;
+    document.documentElement.dataset.testStatus = "failed";
+  });
+</script>
+</html>

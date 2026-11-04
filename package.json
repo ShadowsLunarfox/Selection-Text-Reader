@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "test": "node --test tests/overlay.test.cjs"
+    "test": "node --test tests/*.test.cjs"
   },
   "dependencies": {
     "onnxruntime-web": "1.30.0"

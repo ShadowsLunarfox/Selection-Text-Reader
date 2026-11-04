@@ -103,6 +103,18 @@ You can also start reading from the extension menu, the right-click menu, or <kb
 
 Translation uses Google Translate and requires an internet connection. Reading the translation requires an available voice for the target language in your browser.
 
+### 📖 Read an article or start from a paragraph
+
+Choose **Read article** in the extension menu to extract the main article and start reading. **Read from a paragraph** lets you click the paragraph where reading should begin; press **Esc** to cancel. Navigation, headers, footers, sidebars, hidden controls, and marked advertisements are excluded. The **Skip code blocks when reading articles** setting controls whether code is included. Article detection uses page structure; unusual layouts may work better with a manual text selection.
+
+The mini player provides a progress slider and a paginated **Choose a sentence** list for jumping to a specific sentence. Adjust speed in the player or popup; the change applies from the next sentence. When a voice fails, the current sentence stays available through **Read this sentence again** and **Change voice and continue**. Changing voice requires another installed voice compatible with the reading language.
+
+### 🔖 Continue saved reading
+
+Reading progress and its text are saved locally on this device for up to 20 pages, within a shared text storage limit. Refresh or reopen a page and choose **Continue reading** in the page player or extension menu. Reading resumes from the saved sentence only after you click; it never starts automatically. Completed reading is removed from saved progress.
+
+Use **Forget progress** for one page, or **Clear saved reading** in settings for all saved pages. Turning off **Remember reading progress on this device** clears existing records and disables future saving. Page URLs, including fragments, are matched exactly.
+
 ### 🔍 Scan text on the page
 
 1. Click the extension icon in the toolbar and choose **Scan screen text**.
@@ -125,6 +137,10 @@ For Korean text, choose **Korean + English** under **Screen OCR language** in se
 
 The first three are default shortcuts; the active bindings depend on your browser settings. To change them or resolve conflicts, open `chrome://extensions/shortcuts` or `edge://extensions/shortcuts`.
 
+The single-key **R** shortcut ignores input fields, comment editors, and input-method composition. Disable it globally in settings, or use **Selection button and R shortcut on this site** in the popup. The settings site list accepts one domain per line and also covers subdomains. These preferences control automatic activation; explicit reading and OCR actions remain available.
+
+You can also right-click the page and choose **Block this site** under Selection Text Reader. The same menu item becomes **Unblock this site**; click it again to restore automatic activation. This uses the same domain list as the popup and settings and takes effect immediately.
+
 ## ⚙️ Voice and Preferences
 
 Open **Voice and speed settings** from the extension menu:
@@ -137,6 +153,9 @@ Open **Voice and speed settings** from the extension menu:
 | Speed / Pitch / Volume | Adjust playback and use **Test voice** to hear the result. |
 | Show the on-page selection button | Show or hide the floating logo button when text is selected. |
 | Screen OCR language | Select the appropriate option for Chinese, English, Japanese, or Korean text. |
+| Enable the single-key R shortcut / disabled sites | Control automatic selection buttons and the single-key shortcut, globally or by domain. |
+| Remember reading progress | Save progress on this device; disable it or clear saved reading at any time. |
+| Skip code blocks | Include or exclude code blocks in article reading. |
 
 Click **Save settings** when you are done. Available voices depend on the speech services provided by your operating system and browser.
 

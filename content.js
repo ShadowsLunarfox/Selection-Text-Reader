@@ -30,6 +30,14 @@ let lastReadingIndex = -1;
 let lastReadingStateSignature = "";
 let ocrDragStart = null;
 let uiLanguage = "en";
+let pageSettings = { enableSingleKeyShortcut: true, disabledSites: [], skipCodeBlocks: true };
+let readingSourceRanges = null;
+let readingMode = "selection";
+let lastReadingState = null;
+let savedBookmark = null;
+let paragraphPickerActive = false;
+let sentencePageOffset = 0;
+let sentencePageSession = -1;
 
 document.addEventListener("mousedown", handlePointerDown, true);
 document.addEventListener("mouseup", handleSelectionChange);
@@ -37,13 +45,17 @@ document.addEventListener("keyup", handleSelectionChange);
 document.addEventListener("keydown", handleReadingShortcut, true);
 document.addEventListener("scroll", handleScroll, true);
 document.addEventListener("toggle", handlePageOverlayToggle, true);
+document.addEventListener("click", handleParagraphPick, true);
+document.addEventListener("contextmenu", () => { safeSendMessage({ action: "refresh-site-menu", url: location.href }); }, true);
 loadInterfaceLanguage();
 
 async function loadInterfaceLanguage() {
-  const settings = await safeStorageGet({ uiLanguage: "en" });
+  const settings = await safeStorageGet({ uiLanguage: "en", enableSingleKeyShortcut: true, disabledSites: [], skipCodeBlocks: true });
   if (!settings) return;
   uiLanguage = ReaderI18n.normalizeLanguage(settings.uiLanguage);
+  pageSettings = settings;
   if (shadow) ReaderI18n.apply(shadow, uiLanguage);
+  await restorePageReading();
 }
 
 function tr(key, values) {
@@ -51,7 +63,13 @@ function tr(key, values) {
 }
 
 function handleSelectionChange(event) {
-  if (event.type === "keyup" && event.key.toLowerCase() === "r" && panel && !panel.hidden) {
+  if (
+    event.type === "keyup" &&
+    !ReaderPage.editable(event) &&
+    typeof event.key === "string" &&
+    event.key.toLowerCase() === "r" &&
+    panel && !panel.hidden
+  ) {
     return;
   }
 
@@ -62,8 +80,8 @@ function handleSelectionChange(event) {
   window.clearTimeout(selectionTimer);
   const delay = event.type === "mouseup" ? 400 : 0;
   selectionTimer = window.setTimeout(async () => {
-    const settings = await safeStorageGet({ showSelectionButton: true });
-    if (!settings || !settings.showSelectionButton) {
+    const settings = await safeStorageGet({ showSelectionButton: true, disabledSites: [] });
+    if (!settings || !settings.showSelectionButton || ReaderPage.siteDisabled(location.hostname, settings.disabledSites)) {
       hideOverlay();
       return;
     }
@@ -82,6 +100,8 @@ function handleSelectionChange(event) {
     }
 
     selectedText = text;
+    readingSourceRanges = null;
+    readingMode = "selection";
     clearReadingHighlight();
     selectedRange = selectionDetails.range;
     highlightSearchOffset = 0;
@@ -126,6 +146,11 @@ function handlePointerDown(event) {
 }
 
 function handleReadingShortcut(event) {
+  if (event.key === "Escape" && paragraphPickerActive) {
+    event.preventDefault();
+    cancelParagraphPicker();
+    return;
+  }
   if (event.key === "Escape" && shadow && !shadow.querySelector(".ocr-overlay").hidden) {
     event.preventDefault();
     cancelOcrSelection();
@@ -133,6 +158,11 @@ function handleReadingShortcut(event) {
   }
 
   if (
+    !pageSettings.enableSingleKeyShortcut ||
+    ReaderPage.siteDisabled(location.hostname, pageSettings.disabledSites) ||
+    ReaderPage.editable(event) ||
+    event.composedPath().includes(host) ||
+    typeof event.key !== "string" ||
     event.key.toLowerCase() !== "r" ||
     event.ctrlKey ||
     event.altKey ||
@@ -147,6 +177,8 @@ function handleReadingShortcut(event) {
     if (!selectionDetails.text || !selectionDetails.rect) return;
 
     selectedText = selectionDetails.text;
+    readingSourceRanges = null;
+    readingMode = "selection";
     selectedRange = selectionDetails.range;
     highlightSearchOffset = 0;
     lastReadingIndex = -1;
@@ -163,6 +195,7 @@ function handleReadingShortcut(event) {
 }
 
 function startOcrSelection() {
+  cancelParagraphPicker();
   ensureOverlay();
   const overlay = shadow.querySelector(".ocr-overlay");
   const selectionBox = shadow.querySelector(".ocr-selection");
@@ -260,7 +293,7 @@ async function readOcrText() {
     status.textContent = tr("noTextRead");
     return;
   }
-  const response = await safeSendMessage({ action: "speak-text", text });
+  const response = await safeSendMessage({ action: "speak-text", text, page: currentPageContext("ocr") });
   if (response) status.textContent = tr(response.started ? "readingRecognized" : "unableRead");
 }
 
@@ -411,11 +444,25 @@ function ensureOverlay() {
         padding: 3px 3px 8px; color: #000; background: #c0c0c0; border: 2px solid;
         border-color: #fff #000 #000 #fff; box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080, 2px 2px 0 rgba(0,0,0,.28);
         font: 12px Tahoma, "MS Sans Serif", Arial, sans-serif;
+        max-height: calc(100vh - 24px); overflow: auto;
       }
       .mini-header { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; padding: 3px 5px; color: #fff; background: #000080; font-weight: 700; }
       .mini-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 0 6px; }
       .mini-controls .action { min-width: 0; padding-right: 4px; padding-left: 4px; }
       .mini-progress { margin: 7px 6px 0; padding: 3px 5px; overflow: hidden; background: #fff; border: 2px solid; border-color: #808080 #fff #fff #808080; white-space: nowrap; text-overflow: ellipsis; }
+      .reader-tools, .bookmark-offer { margin: 7px 6px 0; }
+      .reader-tools label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; margin-top: 7px; }
+      .reader-tools input, .reader-tools select { min-width: 0; width: 100%; }
+      .reader-tools select { outline: none; }
+      .reader-status { margin: 7px 0; overflow-wrap: anywhere; }
+      .reader-recovery { display: flex; flex-wrap: wrap; gap: 5px; }
+      .reader-recovery .action { min-width: 0; flex: 1; }
+      .sentence-picker { margin-top: 8px; }
+      .sentence-picker summary { cursor: pointer; }
+      .sentence-items { max-height: 150px; overflow: auto; margin: 6px 0; padding: 0; list-style: none; }
+      .sentence-items button { width: 100%; min-width: 0; padding: 5px; text-align: start; overflow-wrap: anywhere; white-space: normal; }
+      .sentence-items button[aria-current=step] { background: #000080; color: #fff; }
+      .paragraph-instruction { position: fixed; top: 12px; left: 12px; max-width: calc(100vw - 24px); padding: 8px; background: #000080; color: #fff; font: 13px Tahoma, Arial, sans-serif; pointer-events: none; }
       .ocr-overlay { position: fixed; inset: 0; cursor: crosshair; background: rgba(0,0,0,.28); }
       .ocr-instruction { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 7px 12px; color: #fff; background: #000080; border: 2px solid; border-color: #fff #000 #000 #fff; font: 12px Tahoma, "MS Sans Serif", Arial, sans-serif; }
       .ocr-selection { position: fixed; border: 2px dashed #fff; outline: 1px solid #000; background: rgba(0,0,128,.16); }
@@ -426,6 +473,7 @@ function ensureOverlay() {
     <button class="launcher" type="button" data-i18n-title="openReadingPanel" data-i18n-aria-label="openReadingPanel" title="Open reading panel" aria-label="Open reading panel" hidden>${launcherLogo}</button>
     <section class="mini-player" hidden>
       <div class="mini-header">${titleLogo}<span class="title" data-i18n="appName">Selection Text Reader</span></div>
+      <div class="mini-session">
       <div class="mini-controls">
         <button class="action mini-previous" type="button" data-i18n="previous">Previous</button>
         <button class="action mini-pause" type="button" data-i18n="pause">Pause</button>
@@ -433,7 +481,17 @@ function ensureOverlay() {
         <button class="action mini-stop" type="button" data-i18n="stop">Stop</button>
       </div>
       <div class="mini-progress"></div>
+      <div class="reader-tools">
+        <label><span data-i18n="readingProgress">Reading progress</span><input class="reading-seek" type="range" min="0" max="0" value="0" data-i18n-aria-label="readingProgress"></label>
+        <label><span data-i18n="speed">Speed</span><select class="reading-rate" data-i18n-aria-label="speed" data-i18n-title="rateNextSentence">${[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => `<option value="${rate}">${rate}×</option>`).join("")}</select></label>
+        <p class="reader-status" role="status" aria-live="polite"></p>
+        <div class="reader-recovery"><button class="action repeat-current" type="button" data-i18n="repeatCurrent"></button><button class="action change-voice" type="button" data-i18n="changeVoice"></button></div>
+        <details class="sentence-picker"><summary data-i18n="sentenceList"></summary><ol class="sentence-items"></ol><div class="reader-recovery"><button class="action sentence-previous" type="button" data-i18n="previousPage"></button><button class="action sentence-next" type="button" data-i18n="nextPage"></button></div></details>
+      </div>
+      </div>
+      <div class="bookmark-offer" hidden><p class="bookmark-progress"></p><div class="reader-recovery"><button class="action resume-bookmark" type="button" data-i18n="continueReading"></button><button class="action forget-bookmark" type="button" data-i18n="forgetReading"></button></div></div>
     </section>
+    <div class="paragraph-instruction" data-i18n="pickParagraph" hidden></div>
     <div class="ocr-overlay" hidden>
       <div class="ocr-instruction" data-i18n="dragToScan">Drag to select an area. Press Esc to cancel.</div>
       <div class="ocr-selection" hidden></div>
@@ -505,6 +563,15 @@ function ensureOverlay() {
   shadow.querySelector(".mini-pause").addEventListener("click", togglePause);
   shadow.querySelector(".mini-next").addEventListener("click", () => skipReading(1));
   shadow.querySelector(".mini-stop").addEventListener("click", stopReading);
+  shadow.querySelector(".repeat-current").addEventListener("click", () => readingAction("retry-reading"));
+  shadow.querySelector(".change-voice").addEventListener("click", () => readingAction("change-reading-voice"));
+  shadow.querySelector(".reading-rate").addEventListener("change", (event) => readingAction("set-reading-rate", { rate: Number(event.target.value) }));
+  shadow.querySelector(".reading-seek").addEventListener("change", (event) => readingAction("seek-reading", { index: Number(event.target.value) }));
+  shadow.querySelector(".sentence-picker").addEventListener("toggle", (event) => { if (event.target.open) loadSentencePage(); });
+  shadow.querySelector(".sentence-previous").addEventListener("click", () => loadSentencePage(Math.max(0, sentencePageOffset - 40)));
+  shadow.querySelector(".sentence-next").addEventListener("click", () => loadSentencePage(sentencePageOffset + 40));
+  shadow.querySelector(".resume-bookmark").addEventListener("click", resumePageReading);
+  shadow.querySelector(".forget-bookmark").addEventListener("click", forgetPageReading);
   const ocrOverlay = shadow.querySelector(".ocr-overlay");
   ocrOverlay.addEventListener("pointerdown", beginOcrDrag);
   ocrOverlay.addEventListener("pointermove", updateOcrDrag);
@@ -547,9 +614,10 @@ function openPanel() {
 }
 
 async function readOriginal() {
-  const response = await safeSendMessage({ action: "speak-text", text: selectedText });
+  const response = await safeSendMessage({ action: "speak-text", text: selectedText, page: currentPageContext(readingMode) });
   if (!response) return;
-  statusElement.textContent = tr(response?.started ? "readingOriginal" : "unableRead");
+  if (response.state) renderReadingState(response.state);
+  statusElement.textContent = response.state?.status ? ReaderI18n.readingStatus(response.state, uiLanguage) : tr(response?.started ? "readingOriginal" : "unableRead");
 }
 
 async function stopReading() {
@@ -566,14 +634,187 @@ async function skipReading(offset) {
   renderReadingState(await safeSendMessage({ action: "skip-reading", offset }));
 }
 
+function currentPageContext(source = "selection") {
+  return { url: location.href, title: document.title, source, skipCode: pageSettings.skipCodeBlocks };
+}
+
+async function readingAction(action, values = {}) {
+  const state = await safeSendMessage({ action, ...values });
+  if (state?.notice && shadow) {
+    shadow.querySelector(".reader-status").textContent = tr(state.notice);
+  } else if (state?.total) {
+    renderReadingState(state);
+  }
+  return state;
+}
+
+async function loadSentencePage(offset = Math.floor((lastReadingState?.index || 0) / 40) * 40) {
+  const expectedSession = lastReadingState?.session;
+  const queue = await safeSendMessage({ action: "get-reading-queue", offset });
+  if (!shadow || !Array.isArray(queue?.chunks) || queue.session !== expectedSession || lastReadingState?.session !== expectedSession) return;
+  sentencePageOffset = queue.offset;
+  sentencePageSession = queue.session;
+  const list = shadow.querySelector(".sentence-items");
+  list.replaceChildren();
+  queue.chunks.forEach((text, offset) => {
+    const index = queue.offset + offset;
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `${index + 1}. ${text}`;
+    button.dataset.index = index;
+    if (index === lastReadingState.index) button.setAttribute("aria-current", "step");
+    button.addEventListener("click", () => readingAction("seek-reading", { index }));
+    item.appendChild(button);
+    list.appendChild(item);
+  });
+  shadow.querySelector(".sentence-previous").disabled = queue.offset === 0;
+  shadow.querySelector(".sentence-next").disabled = queue.offset + queue.chunks.length >= queue.total;
+}
+
+function getReadingRangeMap() {
+  if (!readingSourceRanges) return buildNormalizedRangeMap(selectedRange);
+  const maps = readingSourceRanges.filter((range) => range.startContainer.isConnected).map(buildNormalizedRangeMap);
+  return { text: maps.map((map) => map.text).join(""), positions: maps.flatMap((map) => map.positions) };
+}
+
+async function restorePageReading() {
+  const state = await safeSendMessage({ action: "get-reading-state" });
+  if (state?.pageUrl === location.href && (state.active || state.status === "error")) {
+    const bookmark = await safeSendMessage({ action: "get-reading-bookmark", url: location.href });
+    if (bookmark?.text) restoreReadingSource(bookmark);
+    renderReadingState(state);
+    return;
+  }
+  const bookmark = await safeSendMessage({ action: "get-reading-bookmark", url: location.href });
+  if (!bookmark?.text || lastReadingState?.active) return;
+  savedBookmark = bookmark;
+  ensureOverlay();
+  shadow.querySelector(".mini-player").hidden = false;
+  shadow.querySelector(".mini-session").hidden = true;
+  shadow.querySelector(".bookmark-offer").hidden = false;
+  shadow.querySelector(".bookmark-progress").textContent = tr("savedReadingAt", { current: bookmark.index + 1, total: bookmark.total });
+}
+
+function restoreReadingSource(bookmark) {
+  selectedText = bookmark.text;
+  readingMode = bookmark.source;
+  readingSourceRanges = null;
+  selectedRange = null;
+  clearReadingHighlight();
+  if (bookmark.source === "article") {
+    pageSettings.skipCodeBlocks = bookmark.skipCode;
+    const article = ReaderPage.extract({ skipCode: bookmark.skipCode });
+    const prefix = normalizeForHighlight(bookmark.text).slice(0, 120);
+    const offset = normalizeForHighlight(article.text).indexOf(prefix);
+    let length = 0;
+    let firstBlock = 0;
+    for (let index = 0; offset >= 0 && index < article.blocks.length; index++) {
+      if (length >= offset) { firstBlock = index; break; }
+      length += normalizeForHighlight(article.blocks[index].text).length;
+    }
+    readingSourceRanges = article.blocks.slice(firstBlock).map((block) => block.range);
+    selectedRange = readingSourceRanges[0] || null;
+  } else if (bookmark.source === "selection" && document.body) {
+    const range = document.createRange();
+    range.selectNodeContents(document.body);
+    const map = buildNormalizedRangeMap(range);
+    const text = normalizeForHighlight(bookmark.text);
+    const index = map.text.indexOf(text);
+    if (index >= 0 && text.length) {
+      const start = map.positions[index];
+      const end = map.positions[index + text.length - 1];
+      range.setStart(start.startNode, start.startOffset);
+      range.setEnd(end.endNode, end.endOffset);
+      selectedRange = range;
+    }
+  }
+}
+
+async function resumePageReading() {
+  const bookmark = await safeSendMessage({ action: "get-reading-bookmark", url: location.href });
+  if (!bookmark?.text) { await forgetPageReading(); return { errorCode: "noSavedReading" }; }
+  restoreReadingSource(bookmark);
+  const state = await safeSendMessage({ action: "resume-reading", url: location.href });
+  if (state?.total) renderReadingState(state);
+  savedBookmark = null;
+  return state;
+}
+
+async function forgetPageReading() {
+  await safeSendMessage({ action: "forget-reading", url: location.href });
+  savedBookmark = null;
+  if (shadow) {
+    shadow.querySelector(".bookmark-offer").hidden = true;
+    if (!lastReadingState?.active && lastReadingState?.status !== "error") shadow.querySelector(".mini-player").hidden = true;
+  }
+}
+
+async function readPageSelection() {
+  const selection = getSelectionDetails();
+  if (!selection.text) return { errorCode: "selectTextFirst" };
+  selectedText = selection.text;
+  selectedRange = selection.range;
+  readingSourceRanges = null;
+  readingMode = "selection";
+  clearReadingHighlight();
+  const response = await safeSendMessage({ action: "speak-text", text: selectedText, page: currentPageContext() });
+  if (response?.state) renderReadingState(response.state);
+  return response;
+}
+
+async function readPageArticle(startElement = null) {
+  const article = ReaderPage.extract({ skipCode: pageSettings.skipCodeBlocks, startElement });
+  if (!article.text) return { errorCode: "noArticle" };
+  selectedText = article.text;
+  readingMode = "article";
+  readingSourceRanges = article.blocks.map((block) => block.range);
+  selectedRange = readingSourceRanges[0];
+  clearReadingHighlight();
+  const response = await safeSendMessage({ action: "speak-text", text: article.text, page: currentPageContext("article") });
+  if (response?.state) renderReadingState(response.state);
+  return response;
+}
+
+function startParagraphPicker() {
+  cancelOcrSelection();
+  ensureOverlay();
+  paragraphPickerActive = true;
+  shadow.querySelector(".paragraph-instruction").hidden = false;
+  shadow.querySelector(".paragraph-instruction").textContent = tr("pickParagraph");
+}
+
+function cancelParagraphPicker() {
+  paragraphPickerActive = false;
+  if (shadow) shadow.querySelector(".paragraph-instruction").hidden = true;
+}
+
+function handleParagraphPick(event) {
+  if (!paragraphPickerActive || event.composedPath().includes(host) || ReaderPage.editable(event) || !(event.target instanceof Element)) return;
+  const paragraph = event.target.closest("p,li,blockquote,pre,h1,h2,h3,h4,h5,h6,td,div");
+  if (!paragraph || ReaderPage.ignored(paragraph, pageSettings.skipCodeBlocks)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  cancelParagraphPicker();
+  readPageArticle(paragraph).then((response) => {
+    if (response?.errorCode && shadow) {
+      shadow.querySelector(".paragraph-instruction").textContent = tr(response.errorCode);
+      shadow.querySelector(".paragraph-instruction").hidden = false;
+      window.setTimeout(() => { if (!paragraphPickerActive && shadow) shadow.querySelector(".paragraph-instruction").hidden = true; }, 3500);
+    }
+  });
+}
+
 function renderReadingState(state) {
   const signature = state
-    ? `${state.active}|${state.paused}|${state.index}|${state.total}|${state.currentText}`
+    ? JSON.stringify([state.session, state.active, state.paused, state.index, state.total, state.currentText, state.status, state.error, state.rate, state.voiceName])
     : "none";
   if (signature === lastReadingStateSignature) return;
   lastReadingStateSignature = signature;
+  lastReadingState = state;
 
-  if (!shadow && state?.active) ensureOverlay();
+  const visible = state?.active || state?.status === "error";
+  if (!shadow && visible) ensureOverlay();
   if (!shadow) return;
   const playback = shadow.querySelector(".playback");
   const current = shadow.querySelector(".current");
@@ -581,18 +822,38 @@ function renderReadingState(state) {
   const miniPlayer = shadow.querySelector(".mini-player");
   const miniPause = shadow.querySelector(".mini-pause");
   const miniProgress = shadow.querySelector(".mini-progress");
-  if (state?.active && miniPlayer.hidden) raiseOverlay();
+  if (visible && miniPlayer.hidden) raiseOverlay();
   playback.hidden = !state?.active;
   current.hidden = !state?.active;
-  miniPlayer.hidden = !state?.active;
+  miniPlayer.hidden = !visible;
+  shadow.querySelector(".mini-session").hidden = !visible;
+  shadow.querySelector(".bookmark-offer").hidden = true;
   pause.textContent = tr(state?.paused ? "resume" : "pause");
   miniPause.textContent = tr(state?.paused ? "resume" : "pause");
   current.textContent = state?.active
     ? `${state.index + 1} / ${state.total}: ${state.currentText}`
     : "";
-  miniProgress.textContent = state?.active
+  miniProgress.textContent = visible
     ? `${state.index + 1} / ${state.total}: ${state.currentText}`
     : "";
+  if (visible) {
+    const seek = shadow.querySelector(".reading-seek");
+    seek.max = Math.max(0, state.total - 1);
+    if (shadow.activeElement !== seek) seek.value = state.index;
+    seek.setAttribute("aria-valuetext", tr("sentenceProgress", { current: state.index + 1, total: state.total }));
+    const rate = shadow.querySelector(".reading-rate");
+    const value = state.rate || 1;
+    if (![...rate.options].some((option) => Number(option.value) === value)) rate.add(new Option(`${value}×`, value));
+    rate.value = value;
+    shadow.querySelector(".reader-status").textContent = ReaderI18n.readingStatus(state, uiLanguage);
+    miniPause.disabled = !state.active;
+    if (statusElement && state.status) statusElement.textContent = ReaderI18n.readingStatus(state, uiLanguage);
+    if (shadow.querySelector(".sentence-picker").open && sentencePageSession !== state.session) loadSentencePage(Math.floor(state.index / 40) * 40);
+    shadow.querySelectorAll(".sentence-items button").forEach((button) => {
+      if (Number(button.dataset.index) === state.index) button.setAttribute("aria-current", "step");
+      else button.removeAttribute("aria-current");
+    });
+  }
 
   if (state?.active) {
     highlightCurrentSentence(state);
@@ -610,12 +871,18 @@ function highlightCurrentSentence(state) {
   if (!selectedRange) return;
 
   try {
-    const selectionMap = buildNormalizedRangeMap(selectedRange);
+    if (state.source === "translation" || state.source === "ocr") { clearReadingHighlight(); return; }
+    const selectionMap = getReadingRangeMap();
     const sentence = normalizeForHighlight(state.currentText);
-    if (!sentence || !selectionMap.text) return;
+    if (!sentence || !selectionMap.text) {
+      clearReadingHighlight();
+      return;
+    }
 
     if (state.index <= lastReadingIndex) highlightSearchOffset = 0;
-    let startIndex = selectionMap.text.indexOf(sentence, highlightSearchOffset);
+    const exactOffset = state.sourceLength === selectionMap.text.length && Number.isInteger(state.sourceOffset) &&
+      selectionMap.text.slice(state.sourceOffset, state.sourceOffset + sentence.length) === sentence;
+    let startIndex = exactOffset ? state.sourceOffset : selectionMap.text.indexOf(sentence, highlightSearchOffset);
     if (startIndex < 0) startIndex = selectionMap.text.indexOf(sentence);
     if (startIndex < 0) {
       clearReadingHighlight();
@@ -655,22 +922,19 @@ function buildNormalizedRangeMap(range) {
   let text = "";
   const positions = [];
   for (const node of nodes) {
+    if (readingMode === "article" && ReaderPage.ignored(node.parentElement, pageSettings.skipCodeBlocks)) continue;
+    const visibility = getComputedStyle(node.parentElement).visibility;
+    if (visibility === "hidden" || visibility === "collapse") continue;
+    const nodeRange = document.createRange();
+    nodeRange.selectNodeContents(node);
+    if (!nodeRange.getClientRects().length) continue;
+
     const startOffset = node === range.startContainer ? range.startOffset : 0;
     const endOffset = node === range.endContainer ? range.endOffset : node.data.length;
     for (let offset = startOffset; offset < endOffset; offset += 1) {
       const character = node.data[offset];
-      if (/\s/u.test(character)) {
-        if (!text || text.endsWith(" ")) {
-          if (text.endsWith(" ")) {
-            positions[positions.length - 1].endNode = node;
-            positions[positions.length - 1].endOffset = offset + 1;
-          }
-          continue;
-        }
-        text += " ";
-      } else {
-        text += character;
-      }
+      if (!normalizeForHighlight(character)) continue;
+      text += character;
       positions.push({
         startNode: node,
         startOffset: offset,
@@ -680,15 +944,13 @@ function buildNormalizedRangeMap(range) {
     }
   }
 
-  if (text.endsWith(" ")) {
-    text = text.slice(0, -1);
-    positions.pop();
-  }
   return { text, positions };
 }
 
 function normalizeForHighlight(text) {
-  return (text || "").replace(/\s+/gu, " ").trim();
+  // Rendered selections add line/block separators that have no DOM text node.
+  // Ignore spacing and discretionary breaks while keeping original DOM offsets.
+  return (text || "").replace(/[\s\u00ad\u200b]+/gu, "");
 }
 
 function ensureHighlightStyle() {
@@ -700,10 +962,62 @@ function ensureHighlightStyle() {
 }
 
 function scrollHighlightIntoView(range) {
-  const rect = range.getBoundingClientRect();
-  if (rect.top < 20 || rect.bottom > window.innerHeight - 90) {
-    window.scrollBy({ top: rect.top - window.innerHeight * 0.35, behavior: "smooth" });
+  // Scroll from the innermost container outward, measuring again after each move.
+  let element = range.startContainer.nodeType === Node.ELEMENT_NODE
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  while (element && element !== document.documentElement) {
+    if (element !== document.scrollingElement) {
+      const style = getComputedStyle(element);
+      const scrollX = /^(auto|scroll|hidden|overlay)$/.test(style.overflowX) && element.scrollWidth > element.clientWidth;
+      const scrollY = /^(auto|scroll|hidden|overlay)$/.test(style.overflowY) && element.scrollHeight > element.clientHeight;
+      if (scrollX || scrollY) {
+        const bounds = element.getBoundingClientRect();
+        const scaleX = bounds.width / element.offsetWidth || 1;
+        const scaleY = bounds.height / element.offsetHeight || 1;
+        const left = bounds.left + element.clientLeft * scaleX;
+        const top = bounds.top + element.clientTop * scaleY;
+        const width = element.clientWidth * scaleX;
+        const height = element.clientHeight * scaleY;
+        const delta = getHighlightScrollDelta(range, {
+          left: left + Math.min(12, width / 4),
+          right: left + width - Math.min(12, width / 4),
+          top: top + Math.min(12, height / 4),
+          bottom: top + height - Math.min(12, height / 4)
+        });
+        if ((scrollX && delta.left) || (scrollY && delta.top)) {
+          element.scrollBy({ left: scrollX ? delta.left / scaleX : 0, top: scrollY ? delta.top / scaleY : 0, behavior: "instant" });
+        }
+      }
+    }
+    element = element.parentElement || element.getRootNode().host;
   }
+
+  const delta = getHighlightScrollDelta(range, {
+    left: 20,
+    right: window.innerWidth - 20,
+    top: Math.min(72, window.innerHeight * 0.2),
+    bottom: window.innerHeight - Math.min(90, window.innerHeight * 0.25)
+  });
+  if (delta.left || delta.top) window.scrollBy({ ...delta, behavior: "instant" });
+}
+
+function getHighlightScrollDelta(range, viewport) {
+  const first = [...range.getClientRects()].find((rect) => rect.width && rect.height);
+  if (!first) return { left: 0, top: 0 };
+  const bounds = range.getBoundingClientRect();
+  // A long sentence can exceed the viewport; reveal its beginning instead of
+  // jumping to its bottom and leaving the first lines behind the clipping edge.
+  const horizontal = bounds.width <= viewport.right - viewport.left ? bounds : first;
+  const vertical = bounds.height <= viewport.bottom - viewport.top ? bounds : first;
+  const offset = (start, end, minimum, maximum) => {
+    if (start < minimum || end - start > maximum - minimum) return start - minimum;
+    return end > maximum ? end - maximum : 0;
+  };
+  return {
+    left: offset(horizontal.left, horizontal.right, viewport.left, viewport.right),
+    top: offset(vertical.top, vertical.bottom, viewport.top, viewport.bottom)
+  };
 }
 
 function clearReadingHighlight() {
@@ -735,7 +1049,8 @@ async function translateAndRead() {
     const readingResponse = await safeSendMessage({
       action: "speak-text",
       text: response.translatedText,
-      lang: targetLanguage
+      lang: targetLanguage,
+      page: currentPageContext("translation")
     });
     if (!readingResponse) return;
     statusElement.textContent = tr("readingTranslation");
@@ -807,18 +1122,49 @@ function invalidateExtensionContext() {
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "sync" || !changes.uiLanguage) return;
-  uiLanguage = ReaderI18n.normalizeLanguage(changes.uiLanguage.newValue);
-  if (shadow) ReaderI18n.apply(shadow, uiLanguage);
+  if (areaName === "local" && changes.readingBookmarks && savedBookmark &&
+    !changes.readingBookmarks.newValue?.some((bookmark) => bookmark.url === location.href)) {
+    savedBookmark = null;
+    if (shadow) {
+      shadow.querySelector(".bookmark-offer").hidden = true;
+      if (!lastReadingState?.active && lastReadingState?.status !== "error") shadow.querySelector(".mini-player").hidden = true;
+    }
+  }
+  if (areaName !== "sync") return;
+  for (const key of ["enableSingleKeyShortcut", "disabledSites", "skipCodeBlocks"]) {
+    if (changes[key]) pageSettings[key] = changes[key].newValue;
+  }
+  if (ReaderPage.siteDisabled(location.hostname, pageSettings.disabledSites)) hideOverlay();
+  if (changes.rememberReading?.newValue === false) forgetPageReading();
+  if (changes.uiLanguage) {
+    uiLanguage = ReaderI18n.normalizeLanguage(changes.uiLanguage.newValue);
+    if (shadow) ReaderI18n.apply(shadow, uiLanguage);
+    if (lastReadingState) { lastReadingStateSignature = ""; renderReadingState(lastReadingState); }
+  }
 });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "get-page-url") {
+    sendResponse({ url: location.href });
+    return;
+  }
+  const actions = { "read-page-selection": readPageSelection, "read-article": () => readPageArticle(), "resume-page-reading": resumePageReading };
+  if (Object.hasOwn(actions, message.action)) {
+    Promise.resolve().then(actions[message.action]).then(sendResponse, (error) => sendResponse({ error: error.message, errorCode: "unableRead" }));
+    return true;
+  }
+  if (message.action === "pick-reading-paragraph") {
+    startParagraphPicker();
+    sendResponse({ picking: true });
+    return;
+  }
   if (message.action === "reading-state") {
     renderReadingState(message.state);
     return;
   }
   if (message.action === "start-ocr-selection") {
     startOcrSelection();
+    sendResponse({ started: true });
     return;
   }
   if (message.action === "ocr-captured") {

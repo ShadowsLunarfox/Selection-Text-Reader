@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS = {
   languageVoices: {},
   autoDetectLanguage: true,
   showSelectionButton: true,
+  enableSingleKeyShortcut: true, disabledSites: [], rememberReading: true, skipCodeBlocks: true,
   ocrLanguage: "eng+chi_sim"
 };
 
@@ -17,6 +18,10 @@ const controls = {
   uiLanguage: document.getElementById("uiLanguage"),
   autoDetectLanguage: document.getElementById("autoDetectLanguage"),
   showSelectionButton: document.getElementById("showSelectionButton"),
+  enableSingleKeyShortcut: document.getElementById("enableSingleKeyShortcut"),
+  disabledSites: document.getElementById("disabledSites"),
+  rememberReading: document.getElementById("rememberReading"),
+  skipCodeBlocks: document.getElementById("skipCodeBlocks"),
   lang: document.getElementById("lang"),
   voiceName: document.getElementById("voiceName"),
   ocrLanguage: document.getElementById("ocrLanguage"),
@@ -53,6 +58,10 @@ async function init() {
 
   controls.autoDetectLanguage.checked = settings.autoDetectLanguage;
   controls.showSelectionButton.checked = settings.showSelectionButton;
+  controls.enableSingleKeyShortcut.checked = settings.enableSingleKeyShortcut;
+  controls.rememberReading.checked = settings.rememberReading;
+  controls.skipCodeBlocks.checked = settings.skipCodeBlocks;
+  controls.disabledSites.value = settings.disabledSites.join("\n");
   controls.lang.value = settings.lang;
   controls.voiceName.value = settings.voiceName;
   controls.ocrLanguage.value = settings.ocrLanguage;
@@ -80,12 +89,12 @@ document.getElementById("backButton").addEventListener("click", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  await saveSettings();
-  showStatus(ReaderI18n.t("settingsSaved", controls.uiLanguage.value));
+  if (await saveSettings()) showStatus(ReaderI18n.t("settingsSaved", controls.uiLanguage.value));
 });
 
 document.getElementById("testButton").addEventListener("click", async () => {
   const settings = await saveSettings();
+  if (!settings) return;
   const languageRoot = settings.lang.toLowerCase().split("-")[0];
   const testVoice = settings.languageVoices[languageRoot] || settings.voiceName;
 
@@ -101,10 +110,20 @@ document.getElementById("testButton").addEventListener("click", async () => {
 });
 
 async function saveSettings() {
+  const sites = controls.disabledSites.value.split(/\s+/u).filter(Boolean);
+  if (sites.some((site) => !ReaderPage.domain(site))) {
+    controls.disabledSites.setCustomValidity(ReaderI18n.t("invalidDomain", controls.uiLanguage.value));
+    controls.disabledSites.reportValidity();
+    return null;
+  }
   const settings = {
     uiLanguage: controls.uiLanguage.value,
     autoDetectLanguage: controls.autoDetectLanguage.checked,
     showSelectionButton: controls.showSelectionButton.checked,
+    enableSingleKeyShortcut: controls.enableSingleKeyShortcut.checked,
+    disabledSites: [...new Set(sites.map(ReaderPage.domain))],
+    rememberReading: controls.rememberReading.checked,
+    skipCodeBlocks: controls.skipCodeBlocks.checked,
     lang: controls.lang.value,
     voiceName: controls.voiceName.value,
     ocrLanguage: controls.ocrLanguage.value,
@@ -119,6 +138,12 @@ async function saveSettings() {
   await chrome.storage.sync.set(settings);
   return settings;
 }
+
+controls.disabledSites.addEventListener("input", () => controls.disabledSites.setCustomValidity(""));
+document.getElementById("clearReadingHistory").addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ action: "clear-reading-history" });
+  showStatus(ReaderI18n.t("historyCleared", controls.uiLanguage.value));
+});
 
 function applyInterfaceLanguage(language) {
   document.documentElement.lang = language;

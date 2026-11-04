@@ -3,7 +3,7 @@
   "minimum_chrome_version": "114",
   "name": "Selection Text Reader",
   "description": "Read selected text aloud in its original language or translate and read it.",
-  "version": "2.6.11",
+  "version": "2.7.1",
   "icons": {
     "16": "assets/icons/icon-16.png",
     "32": "assets/icons/icon-32.png",
@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["i18n.js", "content.js"],
+      "js": ["i18n.js", "reader-page.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

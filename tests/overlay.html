@@ -26,6 +26,7 @@
   };
 </script>
 <script src="/i18n.js"></script>
+<script src="/reader-page.js"></script>
 <script src="/content.js"></script>
 <script>
   const reports = [];
@@ -40,6 +41,7 @@
     } catch (error) {
       reports.push(`FAIL ${name}: ${error.stack || error}`);
     }
+    document.querySelector("#test-results").textContent = reports.join("\n");
   }
   function assertInFront(element) {
     const rect = element.getBoundingClientRect();
@@ -66,6 +68,44 @@
       assert(getSelection().toString() === selectionBefore, "Opening the host changed the selection");
       assert(getComputedStyle(shadow.querySelector(".playback")).display === "none", "Hidden flex controls leaked through");
       assertInFront(launcher);
+    });
+
+    await check("page keyboard events without string keys remain safe", async () => {
+      const errors = [];
+      const recordError = (event) => errors.push(event.message);
+      window.addEventListener("error", recordError);
+      try {
+        for (const key of [undefined, null, 82]) {
+          for (const type of ["keydown", "keyup"]) {
+            const event = new Event(type, { bubbles: true, cancelable: true });
+            if (key !== undefined) Object.defineProperty(event, "key", { value: key });
+            document.querySelector("#page-text").dispatchEvent(event);
+            assert(!event.defaultPrevented, `${type} with key ${key} triggered the reading shortcut`);
+            await pause();
+            assert(panel.hidden, `${type} with key ${key} opened the reading panel`);
+          }
+        }
+        assert(errors.length === 0, `Keyboard handlers threw: ${errors.join("; ")}`);
+        assert(selectedText === getSelection().toString(), "Keyless keyup did not update the selection");
+        assert(!launcher.hidden, "Keyless keyup did not show the selection launcher");
+      } finally {
+        window.removeEventListener("error", recordError);
+      }
+    });
+
+    await check("lowercase and uppercase R open the panel and keyup keeps it open", async () => {
+      for (const key of ["r", "R"]) {
+        const keydown = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+        document.querySelector("#page-text").dispatchEvent(keydown);
+        assert(keydown.defaultPrevented, `${key} shortcut was not handled`);
+        assert(!panel.hidden, `${key} did not open the reading panel`);
+        assert(shadow.querySelector(".text").textContent === getSelection().toString(), "Panel lost the selected text");
+        document.querySelector("#page-text").dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+        await pause();
+        assert(!panel.hidden, `${key} keyup hid the reading panel`);
+        panel.hidden = true;
+        launcher.hidden = false;
+      }
     });
 
     await check("later maximum-z-index elements and page CSS cannot cover the launcher", () => {

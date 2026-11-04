@@ -426,3 +426,15 @@ a:visited {
   border: 1px solid;
   border-color: #808080 #ffffff #ffffff #808080;
 }
+
+.compact-toggle { display: flex; align-items: start; gap: 6px; margin: 9px 0; font-size: 11px; }
+.popup > .compact-toggle, .popup > #playerTools, .popup > #savedReading { margin-right: 9px; margin-left: 9px; }
+[hidden] { display: none !important; }
+.compact-toggle input { width: auto; flex: 0 0 auto; margin: 1px 0 0; }
+#playerTools { margin-top: 10px; }
+#playerTools > label { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; margin: 7px 0; }
+#playerTools input, #playerTools select { width: 100%; min-width: 0; }
+#savedReading { margin: 10px 0; padding: 7px; border: 1px solid #808080; }
+#savedReadingProgress { margin: 0 0 6px; }
+.options textarea { width: 100%; padding: 6px; resize: vertical; font: inherit; border: 2px solid; border-color: #808080 #fff #fff #808080; }
+.setting-help { margin: 0; font-size: 11px; line-height: 1.5; }

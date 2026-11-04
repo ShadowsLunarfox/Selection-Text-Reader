@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Reader features</title>
+<style>body{font:16px/1.5 Arial,sans-serif;margin:20px}main{max-width:580px}pre{overflow:auto}#editors{display:flex;gap:8px}#editors>*{width:90px}#test-results{font-size:10px;max-width:400px;white-space:pre-wrap}</style>
+<nav>Unwanted navigation</nav>
+<main><article>
+<h1>Article heading</h1>
+<p id="first">First paragraph with <strong>inline</strong> text.</p>
+<aside>Advertisement that must not be read</aside>
+<p id="second">Second paragraph to start here.</p>
+<pre><code>const excludedCode = true;</code></pre>
+<p id="third">Third paragraph at the end.<span hidden>Hidden text</span></p>
+<footer>Unwanted footer</footer>
+</article></main>
+<div id="editors"><input aria-label="Search"><textarea aria-label="Comment"></textarea><div contenteditable="true">Editor</div><div role="textbox" tabindex="0">Text box</div></div>
+<pre id="test-results"></pre>
+<script>
+  const messages = [];
+  const settings = { uiLanguage: "zh-CN", enableSingleKeyShortcut: true, disabledSites: [], skipCodeBlocks: true };
+  let readerMessageHandler;
+  let storageChanged;
+  let bookmark = null;
+  let queue = [];
+  let state = { active: false, status: "idle", total: 0, index: 0, session: 0, rate: 1, pageUrl: location.href };
+  const compact = (text) => text.replace(/[\s\u00ad\u200b]+/gu, "");
+  function emit(values) {
+    state = { ...state, ...values };
+    state.currentText = queue[state.index] || "";
+    state.sourceOffset = compact(queue.slice(0, state.index).join(" ")).length;
+    state.sourceLength = compact(queue.join(" ")).length;
+    readerMessageHandler?.({ action: "reading-state", state });
+    return state;
+  }
+  globalThis.chrome = {
+    runtime: {
+      id: "reader-feature-test", getURL: (file) => new URL(file, location.href).href,
+      onMessage: { addListener: (callback) => { readerMessageHandler = callback; } },
+      sendMessage: async (message) => {
+        messages.push(message);
+        if (message.action === "get-reading-state") return state;
+        if (message.action === "get-reading-bookmark") return bookmark;
+        if (message.action === "speak-text") {
+          queue = message.text.match(/[^.!?]+[.!?]?/gu).map((text) => text.trim()).filter(Boolean);
+          emit({ active: true, paused: false, status: "waiting", index: 0, total: queue.length, session: state.session + 1, source: message.page.source, error: "", errorCode: "" });
+          return { started: true, state };
+        }
+        if (message.action === "get-reading-queue") return { session: state.session, index: state.index, offset: message.offset, chunks: queue.slice(message.offset, message.offset + 40), total: queue.length };
+        if (message.action === "seek-reading") return emit({ index: message.index, active: true, status: "waiting" });
+        if (message.action === "set-reading-rate") return emit({ rate: message.rate });
+        if (message.action === "retry-reading") return emit({ active: true, status: "waiting", error: "", errorCode: "" });
+        if (message.action === "change-reading-voice") return emit({ active: true, status: "waiting", voiceName: "Alternate voice", error: "", errorCode: "" });
+        if (message.action === "resume-reading") {
+          queue = bookmark.text.match(/[^.!?]+[.!?]?/gu).map((text) => text.trim()).filter(Boolean);
+          return emit({ index: bookmark.index, total: queue.length, source: bookmark.source, active: true, status: "waiting", session: state.session + 1 });
+        }
+        if (message.action === "forget-reading") { bookmark = null; return { cleared: true }; }
+        if (message.action === "stop-reading") return emit({ active: false, status: "stopped" });
+        return null;
+      }
+    },
+    storage: {
+      sync: { get: async (defaults) => ({ ...defaults, ...settings }), set: async (values) => Object.assign(settings, values) },
+      onChanged: { addListener: (callback) => { storageChanged = callback; } }
+    }
+  };
+</script>
+<script src="/i18n.js"></script>
+<script src="/reader-page.js"></script>
+<script src="/content.js"></script>
+<script>
+  const reports = [];
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  function assert(condition, message) { if (!condition) throw new Error(message); }
+  async function check(name, action) {
+    try { await action(); reports.push(`PASS ${name}`); }
+    catch (error) { reports.push(`FAIL ${name}: ${error.stack || error}`); }
+    document.querySelector("#test-results").textContent = reports.join("\n");
+  }
+  function key(element) {
+    const event = new KeyboardEvent("keydown", { key: "r", bubbles: true, composed: true, cancelable: true });
+    element.dispatchEvent(event);
+    return event;
+  }
+  (async () => {
+    await pause();
+    const selection = document.createRange();
+    selection.selectNodeContents(document.querySelector("#first"));
+    getSelection().addRange(selection);
+    await check("typing R in inputs, editors and shadow inputs never opens the reader", () => {
+      for (const editor of document.querySelectorAll("#editors > *")) {
+        assert(!key(editor).defaultPrevented, "Typing in an editor was intercepted");
+      }
+      const element = document.createElement("div");
+      document.body.appendChild(element);
+      const root = element.attachShadow({ mode: "open" });
+      root.innerHTML = "<input>";
+      assert(!key(root.firstChild).defaultPrevented, "Typing in a shadow input was intercepted");
+      element.remove();
+    });
+    await check("single-key and domain settings suppress automatic activation", async () => {
+      storageChanged({ enableSingleKeyShortcut: { newValue: false } }, "sync");
+      assert(!key(document.querySelector("#first")).defaultPrevented, "Disabled R still opened the reader");
+      storageChanged({ enableSingleKeyShortcut: { newValue: true }, disabledSites: { newValue: [location.hostname] } }, "sync");
+      settings.disabledSites = [location.hostname];
+      assert(!key(document.querySelector("#first")).defaultPrevented, "Disabled site still handled R");
+      handleSelectionChange(new Event("keyup"));
+      await pause();
+      assert(!launcher || launcher.hidden, "Disabled site still showed the selection launcher");
+      settings.disabledSites = [];
+      storageChanged({ disabledSites: { newValue: [] } }, "sync");
+      assert(ReaderPage.siteDisabled("www.facebook.com", ["facebook.com"]), "Domain rule missed a subdomain");
+      assert(!ReaderPage.siteDisabled("notfacebook.com", ["facebook.com"]), "Domain rule matched another site");
+    });
+    await check("right-clicking refreshes the site menu without suppressing the native context menu", async () => {
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      document.querySelector("#first").dispatchEvent(event);
+      await pause();
+      const message = messages.findLast((entry) => entry.action === "refresh-site-menu");
+      assert(message?.url === location.href, "Context menu did not refresh for the current page");
+      assert(!event.defaultPrevented, "The native context menu was suppressed");
+      let response;
+      readerMessageHandler({ action: "get-page-url" }, {}, (value) => { response = value; });
+      assert(response?.url === location.href, "Background could not request the current page URL");
+    });
+    await check("article extraction skips navigation, ads and optional code without duplicating inline text", () => {
+      const article = ReaderPage.extract();
+      assert(article.text.includes("First paragraph with inline text."), "Inline text was lost or split");
+      assert(article.text.includes("Second paragraph"), "Article paragraph was missing");
+      assert(!/Unwanted|Advertisement|Hidden|excludedCode/u.test(article.text), "Excluded content leaked into the article");
+      assert(ReaderPage.extract({ skipCode: false }).text.includes("excludedCode"), "Code could not be included");
+      assert(article.text.match(/First paragraph/gu).length === 1, "Article text was duplicated");
+    });
+    await check("article reading highlights original text and exposes speed, seek and sentence selection", async () => {
+      const response = await readPageArticle();
+      assert(response.started, "Article did not start");
+      assert(CSS.highlights.get("selection-reader-current")?.size, "Article reading has no page highlight");
+      const rate = shadow.querySelector(".reading-rate");
+      rate.value = "1.5";
+      rate.dispatchEvent(new Event("change"));
+      await pause();
+      assert(messages.at(-1).action === "set-reading-rate" && state.rate === 1.5, "Speed control was not connected");
+      const seek = shadow.querySelector(".reading-seek");
+      seek.value = "1";
+      seek.dispatchEvent(new Event("change"));
+      await pause();
+      assert(state.index === 1, "Progress seek did not change the sentence");
+      shadow.querySelector(".sentence-picker").open = true;
+      await pause();
+      const buttons = shadow.querySelectorAll(".sentence-items button");
+      assert(buttons.length === queue.length, "Sentence list did not load");
+      buttons[2].click();
+      await pause();
+      assert(state.index === 2, "Clicking a sentence did not seek");
+    });
+    await check("speech failures remain visible with localized retry and alternate voice actions", async () => {
+      emit({ active: false, status: "error", index: 1, errorCode: "speechFailed", error: "Engine unavailable" });
+      assert(!shadow.querySelector(".mini-player").hidden, "Failed session disappeared");
+      assert(shadow.querySelector(".reader-status").textContent.includes("语音失败"), "Error status was not localized");
+      shadow.querySelector(".repeat-current").click();
+      await pause();
+      assert(state.active && state.index === 1, "Retry did not preserve the sentence");
+      shadow.querySelector(".change-voice").click();
+      await pause();
+      assert(state.voiceName === "Alternate voice", "Voice recovery control was not connected");
+    });
+    await check("paragraph picking starts from the clicked paragraph and Escape cancels it", async () => {
+      startParagraphPicker();
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      document.querySelector("#second").dispatchEvent(event);
+      await pause();
+      const message = messages.findLast((entry) => entry.action === "speak-text");
+      assert(event.defaultPrevented && message.text.startsWith("Second paragraph"), "Paragraph picker started at the wrong place");
+      assert(!message.text.includes("First paragraph"), "Paragraph picker included earlier text");
+      startParagraphPicker();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      assert(!paragraphPickerActive && shadow.querySelector(".paragraph-instruction").hidden, "Escape did not cancel paragraph picking");
+    });
+    await check("saved progress is offered without autoplay and continues only when clicked", async () => {
+      bookmark = { text: "First paragraph with inline text. Second paragraph to start here. Third paragraph at the end.", index: 1, total: 3, source: "selection", url: location.href };
+      state = { ...state, active: false, status: "stopped" };
+      lastReadingState = null;
+      const starts = messages.filter((entry) => entry.action === "speak-text" || entry.action === "resume-reading").length;
+      await restorePageReading();
+      assert(!shadow.querySelector(".bookmark-offer").hidden, "Saved progress offer did not appear");
+      assert(messages.filter((entry) => entry.action === "speak-text" || entry.action === "resume-reading").length === starts, "Saved progress started automatically");
+      shadow.querySelector(".resume-bookmark").click();
+      await pause();
+      assert(state.active && state.index === 1, "Saved progress did not resume at its sentence");
+      state = { ...state, active: false, status: "stopped" };
+      lastReadingState = null;
+      await restorePageReading();
+      shadow.querySelector(".forget-bookmark").click();
+      await pause();
+      assert(bookmark === null && shadow.querySelector(".bookmark-offer").hidden, "Forget progress did not clear the offer");
+    });
+    await check("resuming a paragraph-based article keeps the correct source highlight", async () => {
+      bookmark = { text: "Second paragraph to start here. Third paragraph at the end.", index: 1, total: 2, source: "article", skipCode: true, url: location.href };
+      await resumePageReading();
+      const result = CSS.highlights.get("selection-reader-current");
+      assert(result?.size, "Resumed article has no highlight");
+      assert([...result][0].startContainer.parentElement.closest("#third"), "Resumed paragraph article highlighted the wrong block");
+    });
+    // Leave a realistic paused player on screen for visual inspection.
+    await readPageArticle();
+    emit({ active: true, paused: true, status: "paused" });
+    document.documentElement.dataset.testStatus = reports.some((report) => report.startsWith("FAIL")) ? "failed" : "passed";
+  })().catch((error) => {
+    document.querySelector("#test-results").textContent = error.stack;
+    document.documentElement.dataset.testStatus = "failed";
+  });
+</script></html>

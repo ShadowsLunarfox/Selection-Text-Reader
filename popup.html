@@ -16,15 +16,29 @@
       </div>
       <div class="actions">
         <button id="readButton" type="button" data-i18n="startReading">Start reading</button>
+        <button id="articleButton" type="button" data-i18n="readArticle">Read article</button>
+        <button id="paragraphButton" type="button" data-i18n="readFromParagraph">Read from a paragraph</button>
         <button id="pauseButton" type="button" data-i18n="pause" disabled>Pause</button>
         <button id="stopButton" type="button" data-i18n="stopReading">Stop reading</button>
         <button id="scanButton" type="button" data-i18n="scanScreenText">Scan screen text</button>
+      </div>
+      <label class="compact-toggle"><input id="skipCodeBlocks" type="checkbox" checked><span data-i18n="skipCodeBlocks"></span></label>
+      <label class="compact-toggle"><input id="siteEnabled" type="checkbox" disabled><span data-i18n="siteEnabled"></span></label>
+      <section id="savedReading" hidden>
+        <p id="savedReadingProgress" class="popup-status"></p>
+        <div class="actions"><button id="continueButton" type="button" data-i18n="continueReading"></button><button id="forgetButton" type="button" data-i18n="forgetReading"></button></div>
+      </section>
+      <div id="playerTools" hidden>
+        <label><span data-i18n="readingProgress"></span><input id="readingSeek" type="range" min="0" max="0" value="0" data-i18n-aria-label="readingProgress"></label>
+        <label><span data-i18n="speed"></span><select id="readingRate" data-i18n-title="rateNextSentence"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option></select></label>
+        <div class="actions"><button id="repeatButton" type="button" data-i18n="repeatCurrent"></button><button id="changeVoiceButton" type="button" data-i18n="changeVoice"></button></div>
       </div>
       <p id="readingProgress" class="popup-status"></p>
       <p id="popupStatus" class="popup-status" role="status" aria-live="polite"></p>
       <a href="options.html?popup=1" data-i18n="voiceSettings">Voice and speed settings</a>
     </main>
     <script src="i18n.js"></script>
+    <script src="reader-page.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
