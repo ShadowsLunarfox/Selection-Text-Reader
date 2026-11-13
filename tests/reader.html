@@ -68,7 +68,7 @@
 <script src="/content.js"></script>
 <script>
   const reports = [];
-  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  const pause = (delay = 50) => new Promise((resolve) => setTimeout(resolve, delay));
   function assert(condition, message) { if (!condition) throw new Error(message); }
   async function check(name, action) {
     try { await action(); reports.push(`PASS ${name}`); }
@@ -150,6 +150,59 @@
       buttons[2].click();
       await pause();
       assert(state.index === 2, "Clicking a sentence did not seek");
+    });
+    await check("clicking page buttons and blank space preserves the reading highlight", async () => {
+      await readPageArticle();
+      const button = document.createElement("button");
+      button.textContent = "Page action";
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      document.body.appendChild(button);
+      try {
+        button.scrollIntoView();
+        await pause();
+        const before = CSS.highlights.get("selection-reader-current");
+        for (const type of ["mousedown", "mouseup", "click"]) {
+          button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+        }
+        await pause(450);
+        assert(CSS.highlights.get("selection-reader-current") === before, "Page button cleared the current highlight");
+        emit({ index: queue.findIndex((text) => text.includes("Second paragraph")), status: "speaking" });
+        let range = [...CSS.highlights.get("selection-reader-current")][0];
+        assert(range.startContainer.parentElement.closest("#second"), "Page button replaced the article reading source");
+
+        const current = CSS.highlights.get("selection-reader-current");
+        getSelection().removeAllRanges();
+        for (const type of ["mousedown", "mouseup", "click"]) {
+          document.body.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+        }
+        await pause(450);
+        assert(CSS.highlights.get("selection-reader-current") === current, "Blank page click cleared the current highlight");
+        emit({ index: queue.findIndex((text) => text.includes("Third paragraph")) });
+        range = [...CSS.highlights.get("selection-reader-current")][0];
+        assert(range.startContainer.parentElement.closest("#third"), "Highlight stopped following after a blank page click");
+      } finally {
+        button.remove();
+      }
+    });
+    await check("a new selection leaves article playback intact and can start its own reading", async () => {
+      await readPageArticle();
+      document.querySelector("#second").scrollIntoView();
+      await pause();
+      const selection = document.createRange();
+      selection.selectNodeContents(document.querySelector("#second"));
+      getSelection().removeAllRanges();
+      getSelection().addRange(selection);
+      document.querySelector("#second").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await pause(450);
+      assert(selectedText === document.querySelector("#second").textContent, "New selection was not available for reading");
+      emit({ index: queue.findIndex((text) => text.includes("Third paragraph")), status: "speaking" });
+      let range = [...CSS.highlights.get("selection-reader-current")][0];
+      assert(range.startContainer.parentElement.closest("#third"), "New selection replaced the active reading source");
+      await readOriginal();
+      range = [...CSS.highlights.get("selection-reader-current")][0];
+      assert(range.startContainer.parentElement.closest("#second"), "Explicit reading did not switch to the new selection");
+      assert(state.source === "selection", "New selection kept the previous article mode");
+      await readPageArticle();
     });
     await check("speech failures remain visible with localized retry and alternate voice actions", async () => {
       emit({ active: false, status: "error", index: 1, errorCode: "speechFailed", error: "Engine unavailable" });

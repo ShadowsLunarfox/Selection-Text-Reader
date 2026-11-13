@@ -33,6 +33,7 @@ let uiLanguage = "en";
 let pageSettings = { enableSingleKeyShortcut: true, disabledSites: [], skipCodeBlocks: true };
 let readingSourceRanges = null;
 let readingMode = "selection";
+let readingHighlightSource = null;
 let lastReadingState = null;
 let savedBookmark = null;
 let paragraphPickerActive = false;
@@ -102,10 +103,7 @@ function handleSelectionChange(event) {
     selectedText = text;
     readingSourceRanges = null;
     readingMode = "selection";
-    clearReadingHighlight();
     selectedRange = selectionDetails.range;
-    highlightSearchOffset = 0;
-    lastReadingIndex = -1;
     ensureOverlay();
     positionLauncher(rect);
     panel.hidden = true;
@@ -180,9 +178,6 @@ function handleReadingShortcut(event) {
     readingSourceRanges = null;
     readingMode = "selection";
     selectedRange = selectionDetails.range;
-    highlightSearchOffset = 0;
-    lastReadingIndex = -1;
-    clearReadingHighlight();
     ensureOverlay();
     positionLauncher(selectionDetails.rect);
     launcher.hidden = false;
@@ -614,6 +609,7 @@ function openPanel() {
 }
 
 async function readOriginal() {
+  prepareReadingHighlight();
   const response = await safeSendMessage({ action: "speak-text", text: selectedText, page: currentPageContext(readingMode) });
   if (!response) return;
   if (response.state) renderReadingState(response.state);
@@ -672,9 +668,24 @@ async function loadSentencePage(offset = Math.floor((lastReadingState?.index || 
   shadow.querySelector(".sentence-next").disabled = queue.offset + queue.chunks.length >= queue.total;
 }
 
+function prepareReadingHighlight() {
+  clearReadingHighlight();
+  // Page clicks and new selections can update the panel while speech continues.
+  readingHighlightSource = {
+    range: selectedRange?.cloneRange() || null,
+    ranges: readingSourceRanges?.map((range) => range.cloneRange()) || null,
+    mode: readingMode,
+    skipCode: pageSettings.skipCodeBlocks
+  };
+}
+
 function getReadingRangeMap() {
-  if (!readingSourceRanges) return buildNormalizedRangeMap(selectedRange);
-  const maps = readingSourceRanges.filter((range) => range.startContainer.isConnected).map(buildNormalizedRangeMap);
+  const source = readingHighlightSource || {
+    range: selectedRange, ranges: readingSourceRanges, mode: readingMode, skipCode: pageSettings.skipCodeBlocks
+  };
+  const maps = (source.ranges || [source.range])
+    .filter((range) => range?.startContainer.isConnected)
+    .map((range) => buildNormalizedRangeMap(range, source.mode, source.skipCode));
   return { text: maps.map((map) => map.text).join(""), positions: maps.flatMap((map) => map.positions) };
 }
 
@@ -701,7 +712,6 @@ function restoreReadingSource(bookmark) {
   readingMode = bookmark.source;
   readingSourceRanges = null;
   selectedRange = null;
-  clearReadingHighlight();
   if (bookmark.source === "article") {
     pageSettings.skipCodeBlocks = bookmark.skipCode;
     const article = ReaderPage.extract({ skipCode: bookmark.skipCode });
@@ -729,6 +739,7 @@ function restoreReadingSource(bookmark) {
       selectedRange = range;
     }
   }
+  prepareReadingHighlight();
 }
 
 async function resumePageReading() {
@@ -757,7 +768,7 @@ async function readPageSelection() {
   selectedRange = selection.range;
   readingSourceRanges = null;
   readingMode = "selection";
-  clearReadingHighlight();
+  prepareReadingHighlight();
   const response = await safeSendMessage({ action: "speak-text", text: selectedText, page: currentPageContext() });
   if (response?.state) renderReadingState(response.state);
   return response;
@@ -770,7 +781,7 @@ async function readPageArticle(startElement = null) {
   readingMode = "article";
   readingSourceRanges = article.blocks.map((block) => block.range);
   selectedRange = readingSourceRanges[0];
-  clearReadingHighlight();
+  prepareReadingHighlight();
   const response = await safeSendMessage({ action: "speak-text", text: article.text, page: currentPageContext("article") });
   if (response?.state) renderReadingState(response.state);
   return response;
@@ -865,10 +876,9 @@ function renderReadingState(state) {
 function highlightCurrentSentence(state) {
   if (!globalThis.CSS?.highlights || typeof globalThis.Highlight !== "function") return;
 
-  if (!selectedRange) {
+  if (!readingHighlightSource && !selectedRange) {
     selectedRange = getSelectionDetails().range;
   }
-  if (!selectedRange) return;
 
   try {
     if (state.source === "translation" || state.source === "ocr") { clearReadingHighlight(); return; }
@@ -905,7 +915,7 @@ function highlightCurrentSentence(state) {
   }
 }
 
-function buildNormalizedRangeMap(range) {
+function buildNormalizedRangeMap(range, mode = readingMode, skipCode = pageSettings.skipCodeBlocks) {
   const root = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
     ? range.commonAncestorContainer.parentNode
     : range.commonAncestorContainer;
@@ -922,7 +932,7 @@ function buildNormalizedRangeMap(range) {
   let text = "";
   const positions = [];
   for (const node of nodes) {
-    if (readingMode === "article" && ReaderPage.ignored(node.parentElement, pageSettings.skipCodeBlocks)) continue;
+    if (mode === "article" && ReaderPage.ignored(node.parentElement, skipCode)) continue;
     const visibility = getComputedStyle(node.parentElement).visibility;
     if (visibility === "hidden" || visibility === "collapse") continue;
     const nodeRange = document.createRange();
